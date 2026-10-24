@@ -996,13 +996,13 @@ Decisions taken during ideation (branch `devin/ideation`):
 - **D-11** Agent-neutral integration: MCP everywhere + thin hook mappings for Codex, Claude Code, Google Antigravity and OpenCode (§13.2).
 - **D-12** Refactors and bugfixes are first-class task kinds with baseline-relative evidence; first real user is a social media app refactor (§6.2).
 - **D-13** Keep it simple but high-impact for the demo.
-- **D-14** Primary demo host is Google Antigravity (used with smaller models); other hosts stay supported via the same protocol (§13.3).
+- **D-14** *(superseded by D-22)* Primary demo host is Google Antigravity (used with smaller models); other hosts stay supported via the same protocol (§13.3).
 - **D-15** The demo uses the developer's real social media app during its refactor. Pitch: AGENTS.md is advice agents ignore; ProofMesh turns the same rules into checks and hooks.
-- **D-17** Demo surface: Antigravity for VS Code (fallback: Antigravity App/IDE, same config).
+- **D-17** Demo surfaces: Antigravity for VS Code (plugins load, developer-confirmed) plus a Devin PR gated by the CI verdict.
 - **D-18** `proofmesh init` makes ProofMesh work on any project: file-based detection → proposed policy → human approval (§6.4).
 - **D-19** Architecture rules are trusted-policy checks, added gradually; built-in `ast` checker for Python, configured tools for other languages (§6.5).
-- **D-20** Distribution: one Antigravity plugin (hooks + MCP + Agent Skill + rule) with pinned versions; the skill is portable to other hosts (§13.5).
-- **D-21** Install like comparable tools (graphify, Neon): `uvx proofmesh install antigravity` writes a global Antigravity plugin, idempotent, with exact uninstall; `uvx proofmesh init` does project setup and offers host install; `agy plugin install <repo-subfolder>` and `npx skills add` as alternatives (§13.5).
+- **D-20** *(superseded by D-22)* Distribution: one Antigravity plugin (hooks + MCP + Agent Skill + rule) with pinned versions; the skill is portable to other hosts (§13.5).
+- **D-21** *(superseded by D-22)* Install like comparable tools (graphify, Neon): `uvx proofmesh install antigravity` writes a global Antigravity plugin, idempotent, with exact uninstall; `uvx proofmesh init` does project setup and offers host install; `agy plugin install <repo-subfolder>` and `npx skills add` as alternatives (§13.5).
 - **D-22** *(supersedes D-14, D-20, D-21)* Agent-neutral product. One package in the `plugin/` subfolder, Claude-plugin–compatible layout + Antigravity manifest + Agent Skill + MCP, installed by pasting the repo link; `proofmesh install <host>` is only a fallback (§13.5).
 - **D-23** Devin is a first-class host: Devin CLI/Desktop via the Claude-style adapter, cloud Devin via plugin (skill + MCP) and the CI gate (§13.7).
 - **D-24** Three layers (guide, steer, gate); the CI verdict is the one guarantee that doesn't depend on host hooks (§13.7).
