@@ -350,3 +350,17 @@ def test_cli_incomplete_snapshot_before_verify_refuses_gate(
     assert "Incomplete repository observation before gate execution" in captured.err
     assert "Permission denied during pre-gate scan" in captured.err
 
+
+def test_cli_mcp_subcommand_dispatch(monkeypatch: pytest.MonkeyPatch):
+    """Test CLI mcp subcommand dispatches to run_stdio_server."""
+    called = []
+    def mock_run_stdio_server(**kwargs):
+        called.append(kwargs)
+    monkeypatch.setattr("proofmesh.adapters.mcp_server.run_stdio_server", mock_run_stdio_server)
+
+    exit_code = main(["mcp", "--repo-root", "/fake/root", "--project-id", "proj-123"])
+    assert exit_code == 0
+    assert len(called) == 1
+    assert called[0]["repo_root"] == "/fake/root"
+    assert called[0]["project_id"] == "proj-123"
+

@@ -513,6 +513,20 @@ def cmd_ui(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_mcp(args: argparse.Namespace) -> int:
+    """Launch the official ProofMesh MCP server on stdio transport."""
+    from proofmesh.adapters.mcp_server import run_stdio_server
+
+    cli_store = ProofMeshStore(args.db_path) if getattr(args, "db_path", None) else None
+    run_stdio_server(
+        store=cli_store,
+        repo_root=getattr(args, "repo_root", None),
+        session_id=getattr(args, "session_id", None),
+        project_id=getattr(args, "project_id", None),
+    )
+    return 0
+
+
 # -----------------------------------------------------------------------------
 # Parser & Main
 # -----------------------------------------------------------------------------
@@ -572,6 +586,13 @@ def build_parser() -> argparse.ArgumentParser:
     ui_p.add_argument("--port", type=int, default=8765, help="Port to listen on (default: 8765)")
     ui_p.add_argument("--session-id", default=None, help="Specific session ID to view")
 
+    # mcp
+    mcp_p = subparsers.add_parser("mcp", help="Launch the official ProofMesh MCP server on stdio")
+    mcp_p.add_argument("--repo-root", default=None, help="Repository root directory")
+    mcp_p.add_argument("--session-id", default=None, help="Explicit active session ID")
+    mcp_p.add_argument("--project-id", default=None, help="Owning project ID")
+    mcp_p.add_argument("--db-path", default=None, help="Explicit SQLite database path")
+
     return parser
 
 
@@ -602,6 +623,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return cmd_report(args)
     elif args.subcommand == "ui":
         return cmd_ui(args)
+    elif args.subcommand == "mcp":
+        return cmd_mcp(args)
     else:
         parser.print_help(sys.stderr)
         return 2

@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Convenience runner for ProofMesh CLI
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [ -x "$SCRIPT_DIR/.venv314/bin/proofmesh" ]; then
+    exec "$SCRIPT_DIR/.venv314/bin/proofmesh" "$@"
+elif [ -x "$SCRIPT_DIR/.venv314/bin/python" ]; then
+    PYTHONPATH="$SCRIPT_DIR/src" exec "$SCRIPT_DIR/.venv314/bin/python" -m proofmesh.cli "$@"
+elif [ -x "$SCRIPT_DIR/.venv/bin/python" ]; then
+    PYTHONPATH="$SCRIPT_DIR/src" exec "$SCRIPT_DIR/.venv/bin/python" -m proofmesh.cli "$@"
+else
+    PYTHONPATH="$SCRIPT_DIR/src" exec python3 -m proofmesh.cli "$@"
+fi
