@@ -455,6 +455,38 @@ def cmd_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_ui(args: argparse.Namespace) -> int:
+    """Start the read-only local web status dashboard."""
+    from proofmesh.ui import create_ui_server
+
+    project_id, root_dir, store = _resolve_project()
+    host = getattr(args, "host", "127.0.0.1")
+    port = getattr(args, "port", 8765)
+    session_id = getattr(args, "session_id", None)
+
+    try:
+        server = create_ui_server(
+            store=store,
+            session_id=session_id,
+            repo_root=root_dir,
+            host=host,
+            port=port,
+        )
+    except Exception as e:
+        print(f"Error initializing ProofMesh UI: {e}", file=sys.stderr)
+        return 1
+
+    print(f"ProofMesh UI running at http://{host}:{port}/ (Press Ctrl+C to stop)")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nStopping ProofMesh UI.")
+    finally:
+        server.server_close()
+
+    return 0
+
+
 # -----------------------------------------------------------------------------
 # Parser & Main
 # -----------------------------------------------------------------------------
@@ -508,6 +540,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     report_p.add_argument("--session-id", default=None, help="Specific session ID to report")
 
+    # ui
+    ui_p = subparsers.add_parser("ui", help="Start the read-only local web status dashboard")
+    ui_p.add_argument("--host", default="127.0.0.1", help="Host interface to bind (default: 127.0.0.1)")
+    ui_p.add_argument("--port", type=int, default=8765, help="Port to listen on (default: 8765)")
+    ui_p.add_argument("--session-id", default=None, help="Specific session ID to view")
+
     return parser
 
 
@@ -536,6 +574,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return cmd_evaluate(args)
     elif args.subcommand == "report":
         return cmd_report(args)
+    elif args.subcommand == "ui":
+        return cmd_ui(args)
     else:
         parser.print_help(sys.stderr)
         return 2

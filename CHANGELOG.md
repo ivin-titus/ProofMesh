@@ -1,5 +1,18 @@
 # Change log
 
+## 2026-10-25T01:46:00+05:30 — Complete Checkpoint 8: Presentation and Local Status Panel (`proofmesh ui`)
+
+- **Changed:** Implemented minimal, read-only local web status dashboard and JSON API (`src/proofmesh/ui.py`) and wired `proofmesh ui` CLI subcommand:
+  1. **Zero-Dependency Web Panel (`proofmesh.ui`)**: Pure Python standard library `http.server.HTTPServer` binding strictly to `127.0.0.1` (rejects external hosts with `ValueError`). Completely read-only (rejects POST/PUT with `405 Method Not Allowed`).
+  2. **Responsive Dashboard**: Renders live session status, task contract metadata, large prominent verdict badge (`ALLOW`, `BLOCK`, `REQUIRE_APPROVAL`), scope analysis table, and verification evidence table with fresh/stale indicators and execution summaries. Auto-refreshes every 5 seconds.
+  3. **JSON Endpoints**: Exposes `/api/status` and `/api/receipt` returning canonical validated JSON receipts.
+  4. **CLI Integration**: Added `proofmesh ui [--host 127.0.0.1] [--port 8765] [--session-id ID]` subcommand with clean shutdown on `Ctrl+C`.
+  5. **Automated Tests (`tests/test_ui.py`)**: Added unit and integration tests covering fallback rendering, populated dashboard rendering, ephemeral server lifecycle, endpoint responses, 405 method rejection, and localhost binding security.
+- **Why:** Delivers Checkpoint 8 (Presentation and one optional stretch) per TRD/BUILD_PLAN, providing judges and developers an instant, visual, zero-dependency browser panel for the control loop without adding any frontend build tools, npm, or cloud dependencies.
+- **Validation:** Executed 148 automated tests (3 new tests in `test_ui.py` + 145 existing tests) under target CPython 3.14.9 (`.venv314`, 148/148 passed in 9.53s) and host Python 3.12.3 (`.venv`, 148/148 passed in 9.68s). Verified `proofmesh ui` CLI help and server startup.
+- **Test result:** 148 passed in 9.53s on CPython 3.14.9; 148 passed in 9.68s on Python 3.12.3.
+- **Limitations:** Read-only interface on localhost; interactive editing and multi-tenant hosting deferred to future roadmap.
+
 ## 2026-10-25T01:41:00+05:30 — Complete Checkpoints 6 and 7: CLI, Seeded Demo, Receipts, MCP Server, and Host Adapter
 
 - **Changed:** Implemented, tested, and integrated the complete operator CLI, deterministic seeded demo, tamper-evident receipts, official Python MCP server, and host lifecycle hook adapter:

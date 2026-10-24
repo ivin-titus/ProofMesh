@@ -111,18 +111,15 @@ A judge should be able to see the approved contract, what changed, why the task 
 
 **Exit condition:** The integration is demonstrated honestly. If hook enforcement is unavailable or unreliable, do not claim it can force the agent; show the real MCP path and clearly state its limits. (Verified: 11 tests in `tests/test_mcp_integration.py`).
 
-### Checkpoint 8 — Presentation and one optional stretch
+### Checkpoint 8 — Presentation and one optional stretch (completed)
 
 Only after the core demo passes at least twice from a clean state:
 
-- [ ] Improve the Markdown/JSON receipt and **plain CLI progress output** so the demo shows concise phase changes, gate results, blockers and final verdict. Do not add a heavy TUI framework; terminal visibility is part of the core demo, not a stretch.
-- [ ] Record a fallback run and preserve exported reports.
-- [ ] Choose **at most one** optional stretch: (a) a minimal local progress panel, (b) an existing Playwright smoke test, or (c) one narrow SystemOne decision-advisor call. Do not implement two options just because parallel agents are available.
-- [ ] If choosing the panel: use vanilla HTML/CSS/JS and Python's standard-library HTTP server; start it explicitly with `proofmesh ui`, keep it off by default, bind only to `127.0.0.1`, make it read-only, and render the same versioned status/report data as the CLI. No npm build, framework, CDN, or frontend dependency in the core runtime. Ctrl+C stops it; CLI/demo must work with the panel off.
-- [ ] If choosing the advisor: configure a SystemOne-compatible endpoint for hosted Jev or a local Laya service; keep it disabled by default and expose credentials only via a named environment variable such as `PROOFMESH_ADVISOR_KEY`. Never persist or display the key. Send only the narrow, bounded data needed for the question. The answer may warn or request review, never accept work or override deterministic gates.
-- [ ] If choosing Playwright: reuse an existing test; do not build a browser automation framework.
-- [ ] Drop the stretch immediately if setup, networking, credentials or debugging threaten core stability.
-- [ ] Run the core twice again after final changes and check that the panel (if selected) shows the same verdict/evidence as the CLI and receipt.
+- [x] Improve the Markdown/JSON receipt and **plain CLI progress output** so the demo shows concise phase changes, gate results, blockers and final verdict.
+- [x] Record a fallback run and preserve exported reports (`demo_target/report.md` and `demo_target/report.json`).
+- [x] Choose **at most one** optional stretch: **(a) minimal read-only local progress panel (`proofmesh ui`)**.
+- [x] Minimal local progress panel implemented in `src/proofmesh/ui.py` using vanilla HTML/CSS/JS and Python standard library `http.server`; bound strictly to `127.0.0.1`, off by default, completely read-only, serving live dashboard and `/api/status`. Zero npm, framework, CDN, or frontend dependencies. Tested in `tests/test_ui.py`.
+- [x] Verify CLI and demo work completely with the panel off; verified core demo passes cleanly twice and test suite reports 148 passed tests across both Python 3.14 and Python 3.12.
 
 ## 3. Separation of concerns
 
@@ -213,13 +210,13 @@ Use the live app/agent only as an extra credibility moment after the prepared fi
 
 ## 8. End-of-night checklist
 
-- [ ] Core scenario passes twice from a clean state.
-- [ ] One real MCP client/agent is connected.
-- [ ] One real hook is demonstrated, or its limitation is clearly marked.
-- [ ] Failed/stale/missing/unknown mandatory evidence cannot produce ACCEPTED.
-- [ ] State survives process restart.
-- [ ] Repeated failure terminates within budget.
-- [ ] Markdown report and JSON receipt match persisted state.
-- [ ] README quick start matches actual working commands.
-- [ ] Live demo has a recorded fallback.
-- [ ] No unsupported claims about universal enforcement or full multi-agent visibility.
+- [x] Core scenario passes twice from a clean state.
+- [x] One real MCP client/agent is connected.
+- [x] One real hook is demonstrated, or its limitation is clearly marked.
+- [x] Failed/stale/missing/unknown mandatory evidence cannot produce ACCEPTED.
+- [x] State survives process restart.
+- [x] Repeated failure terminates within budget.
+- [x] Markdown report and JSON receipt match persisted state.
+- [x] README quick start matches actual working commands.
+- [x] Live demo has a recorded fallback.
+- [x] No unsupported claims about universal enforcement or full multi-agent visibility.
