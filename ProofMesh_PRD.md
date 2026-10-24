@@ -211,7 +211,7 @@ Priority definitions: **P0** = necessary for the hackathon end-to-end demo; **P1
 | FR-23 | P0 | Test obligations | Mapped code changes require test changes; new tests must run, and (bugfix / opted-in features) fail on baseline; test deletion, skips and count drops need approval. |
 | FR-24 | P0 | Project initialisation | `proofmesh init` detects the stack from files (no code execution) and writes a proposed policy for the developer to approve; works for projects other than the demo. |
 | FR-25 | P0 | Architecture rules as checks | Rules added gradually in policy; violations name file, line, rule and forbidden import; Python checked built-in, other languages via configured tools. |
-| FR-26 | P0 | One-step install | Antigravity plugin bundling hooks, MCP server, Agent Skill and a short rule, with pinned versions and `proofmesh doctor`. |
+| FR-26 | P0 | One-step install | `uvx proofmesh install antigravity` writes a global Antigravity plugin (hooks, MCP server, Agent Skill, short rule) with pinned versions; idempotent; exact `uninstall`; `proofmesh doctor` checks it. `uvx proofmesh init` sets up a project and offers host install. |
 | FR-19 | P0 | Review-ready submission | One-command offline demo produces Markdown + JSON reports; README claims map to code and tests; CI is green. |
 
 ## 10. Quality gates

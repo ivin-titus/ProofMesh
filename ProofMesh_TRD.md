@@ -665,7 +665,7 @@ What each adapter does on the key events:
 
 Loop safety for every host: honour host loop flags (e.g. Codex `stop_hook_active`), apply ProofMesh's own continuation budget, and make evaluation idempotent per (event, snapshot).
 
-`proofmesh integrate <host>` prints the exact config snippet (MCP server entry + hook entries) for that host; `--write` applies it only after showing a diff. The enforcement report shows, per host, which capabilities are active.
+`proofmesh install <host>` writes that host's config (MCP server + hooks, as a plugin where supported) after showing what it will write; `proofmesh uninstall <host>` removes exactly what was written (§13.5). The enforcement report shows, per host, which capabilities are active.
 
 **Demo host: Google Antigravity** (the developer's daily tool, used with smaller/weaker models). Other hosts are supported through the same protocol and golden-file tests; they are not part of the recorded demo unless time allows.
 
@@ -712,7 +712,24 @@ proofmesh/                         # plugin directory
   rules/proofmesh.md               # short always-on rule: "ProofMesh owns task acceptance"
 ```
 
-Install paths: `agy plugin install https://github.com/ivin-titus/ProofMesh` (subdirectory layout to verify), or copy the folder to `~/.gemini/config/plugins/proofmesh/`. Then `proofmesh init` in the project.
+**How comparable tools install (researched 2026-10):**
+
+| Tool | Install command | What it writes |
+|---|---|---|
+| graphify | `graphify antigravity install` | global skill (`SKILL.md`), project `.agents/rules/graphify.md` (always-on) and `.agents/workflows/graphify.md`; prints an MCP snippet to paste; matching `uninstall` |
+| Neon | `npx neon@latest init` (also `neon mcp`, `neon plugins`) | asks which agents, authenticates, writes MCP config, installs agent skills; plugins where the agent supports them |
+| Supabase | MCP server URL (+ "Supabase Plugin for AI Coding Agents", agent skills) | remote MCP with scoping parameters (`read_only`, `project_ref`, `features`) |
+| `skills` CLI (vercel-labs) | `npx skills add <owner>/<repo>` | copies/symlinks `SKILL.md` into each agent's skills dir; supports `antigravity` (`.agents/skills/`, global `~/.gemini/antigravity/skills/`); hooks not supported for Antigravity |
+| Antigravity native | Customizations panel, `agy plugin install <github-url|path>`, or a folder in `~/.gemini/config/plugins/` | the plugin's hooks, MCP servers, skills and rules |
+
+The common pattern: **one command from the tool's own CLI that writes the host's config files**, is idempotent, and has an uninstall. ProofMesh follows it:
+
+- `uvx proofmesh install antigravity` writes the plugin folder to `~/.gemini/config/plugins/proofmesh/` (global, outside the workspace the agent edits), shows what it will write first, is safe to re-run, and records what it wrote so `proofmesh uninstall antigravity` removes exactly that. `--project` writes to `.agents/plugins/proofmesh/` instead (less tamper-resistant; the report says so).
+- Alternative: `agy plugin install https://github.com/ivin-titus/ProofMesh` pointing at the plugin subfolder, or adding it from Antigravity's Customizations panel.
+- Skill only, for other agents: `npx skills add ivin-titus/ProofMesh` (guidance only; no hooks).
+- `uvx proofmesh init` runs in the project: detects the stack (§6.4), proposes `policy.toml`, and, like `neon init`, offers to run `install` for any detected host that isn't set up yet. One command from zero to governed.
+- Hooks are why ProofMesh installs a plugin and not just a skill: graphify and the `skills` CLI install skills/rules only for Antigravity, which guide but cannot block. ProofMesh needs `PreToolUse` and `Stop`.
+- MCP config path differs between docs (`~/.gemini/config/mcp_config.json`) and some tools (`~/.gemini/antigravity/mcp_config.json`); bundling MCP inside the plugin avoids depending on either. `proofmesh doctor` reports what Antigravity actually loaded.
 
 **The skill** follows the open Agent Skills format (`SKILL.md` with `name` + `description` front matter), so the same file works in Antigravity, Claude Code and Codex. Best practices applied:
 
@@ -787,7 +804,7 @@ proofmesh task lint <file>
 proofmesh task render <task-id> --revision <n>
 proofmesh task show <task-id>
 proofmesh approvals list | approve <id> | reject <id> --reason <text> | waive <gate-id> --reason <text>
-proofmesh integrate <host> [--write]
+proofmesh install <host> [--project] | uninstall <host>
 proofmesh init [--dry-run]
 proofmesh rules add | list | propose
 proofmesh doctor
@@ -959,12 +976,13 @@ Decisions taken during ideation (branch `devin/ideation`):
 - **D-18** `proofmesh init` makes ProofMesh work on any project: file-based detection → proposed policy → human approval (§6.4).
 - **D-19** Architecture rules are trusted-policy checks, added gradually; built-in `ast` checker for Python, configured tools for other languages (§6.5).
 - **D-20** Distribution: one Antigravity plugin (hooks + MCP + Agent Skill + rule) with pinned versions; the skill is portable to other hosts (§13.5).
+- **D-21** Install like comparable tools (graphify, Neon): `uvx proofmesh install antigravity` writes a global Antigravity plugin, idempotent, with exact uninstall; `uvx proofmesh init` does project setup and offers host install; `agy plugin install <repo-subfolder>` and `npx skills add` as alternatives (§13.5).
 - **D-16** ProofMesh enforces test obligations: tests with every change, new tests must run and fail on baseline, no test weakening (§6.3).
 
 Open questions:
 
 1. **VS Code extension support:** does Antigravity for VS Code load global plugins/hooks like the App/IDE? (verify first — §19 step 0)
-2. **Plugin install from GitHub:** can `agy plugin install <repo-url>` install from a subdirectory, or does the plugin need its own repo / repo-root layout?
+2. **Plugin install from GitHub:** the plugin lives in a subfolder of this repo (decided). Verify the exact `agy plugin install` URL form for a subfolder; `proofmesh install antigravity` does not depend on it.
 3. **TaskFile grammar details:** exact AC/invariant/assumption line syntax.
 4. **Digest normalization:** which Markdown changes count as "cosmetic" vs. intent changes.
 5. **Checks that write files:** redirect caches per tool vs. run checks on a temporary worktree.
