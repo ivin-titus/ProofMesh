@@ -118,8 +118,15 @@ def _get_or_create_active_session(
     store: ProofMeshStore, project_id: str, repo_root: Path
 ) -> Session:
     """Get the active session, or auto-create one if an approved task revision exists."""
+    policy, policy_digest = resolve_trusted_policy()
     existing = store.get_active_session_for_project(project_id, repo_root=str(repo_root))
     if existing is not None and existing.state == SessionState.ACTIVE:
+        if existing.policy_digest != policy_digest:
+            raise ValueError(
+                f"Active session '{existing.session_id}' has policy digest '{existing.policy_digest}', "
+                f"which does not match current trusted policy digest '{policy_digest}'. "
+                f"Re-approval or new session required."
+            )
         return existing
 
     conn = store.get_connection()
@@ -149,8 +156,6 @@ def _get_or_create_active_session(
     baseline = capture_snapshot(repo_root)
     store.save_snapshot(baseline)
 
-    policy, policy_digest = resolve_trusted_policy()
-
     session_id = f"sess-{uuid.uuid4().hex[:10]}"
     session = Session(
         session_id=session_id,
@@ -161,7 +166,7 @@ def _get_or_create_active_session(
         current_snapshot_id=baseline.snapshot_id,
         profile=policy.profile,
         policy_digest=policy_digest,
-        integration_status=IntegrationStatus.ENFORCED,
+        integration_status=IntegrationStatus.UNGUARDED,
         state=SessionState.ACTIVE,
         started_at=datetime.now(timezone.utc),
     )

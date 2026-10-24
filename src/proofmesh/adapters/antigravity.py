@@ -72,13 +72,6 @@ class AntigravityAdapter:
         hooks_active = self.hooks_enabled
         mcp_active = self.mcp_enabled
 
-        if session is not None:
-            if session.integration_status == IntegrationStatus.ENFORCED:
-                hooks_active = True
-                mcp_active = True
-            elif session.integration_status == IntegrationStatus.PARTIAL:
-                mcp_active = True
-
         if hooks_active and mcp_active:
             return IntegrationStatus.ENFORCED
         elif hooks_active or mcp_active:
