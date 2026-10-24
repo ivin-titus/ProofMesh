@@ -130,11 +130,29 @@ class ProofMeshStore:
         validate_project_id(project_id)
 
         existing = self.get_task_revision(revision.task_id, revision.revision)
-        if existing is not None and existing.approval_status == ApprovalStatus.APPROVED:
-            if revision.approval_status not in (ApprovalStatus.APPROVED, ApprovalStatus.SUPERSEDED):
-                raise ValueError(
-                    f"Task revision '{revision.task_id}' rev {revision.revision} is approved and immutable"
-                )
+        if existing is not None:
+            if existing.approval_status == ApprovalStatus.APPROVED:
+                if existing.contract_digest != revision.contract_digest:
+                    raise ValueError(
+                        f"Task revision '{revision.task_id}' rev {revision.revision} is approved and its contract digest is immutable"
+                    )
+                if revision.approval_status not in (ApprovalStatus.APPROVED, ApprovalStatus.SUPERSEDED):
+                    raise ValueError(
+                        f"Cannot modify approval status of approved revision '{revision.task_id}' rev {revision.revision} to {revision.approval_status.value}"
+                    )
+                if revision.approval_status == ApprovalStatus.APPROVED and (
+                    existing.approved_by != revision.approved_by
+                    or (existing.approved_at and revision.approved_at and existing.approved_at != revision.approved_at)
+                ):
+                    raise ValueError(
+                        f"Task revision '{revision.task_id}' rev {revision.revision} is already approved and cannot be re-approved with different metadata"
+                    )
+            elif existing.approval_status == ApprovalStatus.PROPOSED:
+                if existing.contract_digest != revision.contract_digest and revision.approval_status == ApprovalStatus.PROPOSED:
+                    raise ValueError(
+                        f"Conflicting proposal for task '{revision.task_id}' rev {revision.revision}: cannot overwrite existing proposal with different content"
+                    )
+
         ac_json = json.dumps([ac.model_dump(mode="json") for ac in revision.acceptance_criteria])
         scope_json = json.dumps(revision.scope.model_dump(mode="json"))
         gates_json = json.dumps(revision.required_gates)
@@ -178,6 +196,64 @@ class ProofMeshStore:
                     revision.raw_markdown,
                 ),
             )
+
+    def approve_task_revision(
+        self,
+        task_id: str,
+        revision: int,
+        approved_by: str,
+        approved_at: datetime,
+        parent_revision: int | None = None,
+        project_id: str | None = None,
+    ) -> TaskRevision:
+        """Atomically approve a proposed task revision and supersede its parent revision."""
+        with self.transaction() as conn:
+            row = conn.execute(
+                """
+                SELECT task_id, revision, parent_revision, summary, acceptance_criteria_json,
+                       scope_json, required_gates_json, constraints_json,
+                       risk_level, approval_status, approved_by, approved_at, contract_digest, raw_markdown
+                FROM task_revisions
+                WHERE task_id = ? AND revision = ?;
+                """,
+                (task_id, revision),
+            ).fetchone()
+
+            if not row:
+                raise ValueError(f"Task revision '{task_id}' revision {revision} not found")
+
+            current_status = row["approval_status"]
+            if current_status == ApprovalStatus.SUPERSEDED.value:
+                raise ValueError(f"Cannot approve superseded task revision '{task_id}' revision {revision}")
+            if current_status == ApprovalStatus.APPROVED.value:
+                raise ValueError(f"Task revision '{task_id}' revision {revision} is already approved")
+
+            approved_at_str = approved_at.isoformat()
+            conn.execute(
+                """
+                UPDATE task_revisions
+                SET approval_status = ?, approved_by = ?, approved_at = ?
+                WHERE task_id = ? AND revision = ?;
+                """,
+                (ApprovalStatus.APPROVED.value, approved_by.strip(), approved_at_str, task_id, revision),
+            )
+
+            # Atomically mark parent revision as superseded
+            resolved_parent = parent_revision if parent_revision is not None else row["parent_revision"]
+            if resolved_parent is not None:
+                conn.execute(
+                    """
+                    UPDATE task_revisions
+                    SET approval_status = ?
+                    WHERE task_id = ? AND revision = ? AND approval_status = ?;
+                    """,
+                    (ApprovalStatus.SUPERSEDED.value, task_id, resolved_parent, ApprovalStatus.APPROVED.value),
+                )
+
+        updated = self.get_task_revision(task_id, revision)
+        if updated is None:
+            raise RuntimeError(f"Failed to load approved task revision '{task_id}' rev {revision}")
+        return updated
 
     def get_task_revision(self, task_id: str, revision: int) -> TaskRevision | None:
         """Load and revalidate a task revision from the database."""
@@ -284,23 +360,47 @@ class ProofMeshStore:
                 ),
             )
 
-    def get_session(self, session_id: str) -> Session | None:
-        """Retrieve and validate a session."""
+    def get_session(
+        self,
+        session_id: str,
+        project_id: str | None = None,
+        repo_root: Path | str | None = None,
+    ) -> Session | None:
+        """Retrieve and validate a session, optionally checking project_id and repo_root."""
         conn = self.get_connection()
         try:
-            row = conn.execute(
-                """
-                SELECT session_id, task_id, contract_revision, repo_root,
-                       baseline_snapshot_id, current_snapshot_id, profile,
-                       policy_digest, integration_status, state, started_at, ended_at
-                FROM sessions
-                WHERE session_id = ?;
-                """,
-                (session_id,),
-            ).fetchone()
+            if project_id:
+                row = conn.execute(
+                    """
+                    SELECT s.session_id, s.task_id, s.contract_revision, s.repo_root,
+                           s.baseline_snapshot_id, s.current_snapshot_id, s.profile,
+                           s.policy_digest, s.integration_status, s.state, s.started_at, s.ended_at
+                    FROM sessions s
+                    JOIN tasks t ON s.task_id = t.task_id
+                    WHERE s.session_id = ? AND t.project_id = ?;
+                    """,
+                    (session_id, project_id),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """
+                    SELECT session_id, task_id, contract_revision, repo_root,
+                           baseline_snapshot_id, current_snapshot_id, profile,
+                           policy_digest, integration_status, state, started_at, ended_at
+                    FROM sessions
+                    WHERE session_id = ?;
+                    """,
+                    (session_id,),
+                ).fetchone()
 
             if not row:
                 return None
+
+            if repo_root is not None:
+                expected_root = str(Path(repo_root).resolve())
+                actual_root = str(Path(row["repo_root"]).resolve())
+                if expected_root != actual_root:
+                    return None
 
             ended_at = None
             if row["ended_at"]:
@@ -323,6 +423,70 @@ class ProofMeshStore:
         finally:
             conn.close()
 
+    def get_active_session_for_project(
+        self,
+        project_id: str,
+        repo_root: Path | str | None = None,
+    ) -> Session | None:
+        """Retrieve the most recently active session for a specific project and repository root."""
+        conn = self.get_connection()
+        try:
+            rows = conn.execute(
+                """
+                SELECT s.session_id, s.task_id, s.contract_revision, s.repo_root,
+                       s.baseline_snapshot_id, s.current_snapshot_id, s.profile,
+                       s.policy_digest, s.integration_status, s.state, s.started_at, s.ended_at
+                FROM sessions s
+                JOIN tasks t ON s.task_id = t.task_id
+                WHERE t.project_id = ? AND s.state = 'ACTIVE'
+                ORDER BY s.started_at DESC;
+                """,
+                (project_id,),
+            ).fetchall()
+
+            if not rows:
+                rows = conn.execute(
+                    """
+                    SELECT s.session_id, s.task_id, s.contract_revision, s.repo_root,
+                           s.baseline_snapshot_id, s.current_snapshot_id, s.profile,
+                           s.policy_digest, s.integration_status, s.state, s.started_at, s.ended_at
+                    FROM sessions s
+                    JOIN tasks t ON s.task_id = t.task_id
+                    WHERE t.project_id = ?
+                    ORDER BY s.started_at DESC;
+                    """,
+                    (project_id,),
+                ).fetchall()
+
+            for row in rows:
+                if repo_root is not None:
+                    expected_root = str(Path(repo_root).resolve())
+                    actual_root = str(Path(row["repo_root"]).resolve())
+                    if expected_root != actual_root:
+                        continue
+
+                ended_at = None
+                if row["ended_at"]:
+                    ended_at = datetime.fromisoformat(row["ended_at"])
+
+                return Session(
+                    session_id=row["session_id"],
+                    task_id=row["task_id"],
+                    contract_revision=row["contract_revision"],
+                    repo_root=row["repo_root"],
+                    baseline_snapshot_id=row["baseline_snapshot_id"],
+                    current_snapshot_id=row["current_snapshot_id"],
+                    profile=OperatingProfile(row["profile"]),
+                    policy_digest=row["policy_digest"],
+                    integration_status=IntegrationStatus(row["integration_status"]),
+                    state=SessionState(row["state"]),
+                    started_at=datetime.fromisoformat(row["started_at"]),
+                    ended_at=ended_at,
+                )
+            return None
+        finally:
+            conn.close()
+
     # -------------------------------------------------------------------------
     # Snapshots
     # -------------------------------------------------------------------------
@@ -330,13 +494,17 @@ class ProofMeshStore:
     def save_snapshot(self, snapshot: RepoSnapshot) -> None:
         """Persist a repository snapshot."""
         files_json = json.dumps([f.model_dump(mode="json") for f in snapshot.files])
+        obs_json = json.dumps(list(snapshot.observation_errors))
         with self.transaction() as conn:
             conn.execute(
                 """
                 INSERT INTO snapshots (
-                    snapshot_id, repo_root, git_commit, git_dirty, files_json, captured_at
-                ) VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(snapshot_id) DO NOTHING;
+                    snapshot_id, repo_root, git_commit, git_dirty, files_json, captured_at,
+                    complete, observation_errors_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(snapshot_id) DO UPDATE SET
+                    complete = excluded.complete,
+                    observation_errors_json = excluded.observation_errors_json;
                 """,
                 (
                     snapshot.snapshot_id,
@@ -345,6 +513,8 @@ class ProofMeshStore:
                     1 if snapshot.git_dirty else 0,
                     files_json,
                     snapshot.captured_at.isoformat(),
+                    1 if snapshot.complete else 0,
+                    obs_json,
                 ),
             )
 
@@ -354,7 +524,8 @@ class ProofMeshStore:
         try:
             row = conn.execute(
                 """
-                SELECT snapshot_id, repo_root, git_commit, git_dirty, files_json, captured_at
+                SELECT snapshot_id, repo_root, git_commit, git_dirty, files_json, captured_at,
+                       complete, observation_errors_json
                 FROM snapshots
                 WHERE snapshot_id = ?;
                 """,
@@ -366,6 +537,9 @@ class ProofMeshStore:
 
             raw_files = json.loads(row["files_json"])
             files = [FileFingerprint.model_validate(f) for f in raw_files]
+            complete = bool(row["complete"]) if "complete" in row.keys() else True
+            raw_obs = row["observation_errors_json"] if "observation_errors_json" in row.keys() else "[]"
+            obs_errors = tuple(json.loads(raw_obs)) if raw_obs else ()
 
             return RepoSnapshot(
                 snapshot_id=row["snapshot_id"],
@@ -374,6 +548,8 @@ class ProofMeshStore:
                 git_dirty=bool(row["git_dirty"]),
                 files=files,
                 captured_at=datetime.fromisoformat(row["captured_at"]),
+                complete=complete,
+                observation_errors=obs_errors,
             )
         finally:
             conn.close()
@@ -664,3 +840,88 @@ class ProofMeshStore:
             evidence_ids=json.loads(row["evidence_ids_json"]),
             evaluated_at=datetime.fromisoformat(row["evaluated_at"]),
         )
+
+    # -------------------------------------------------------------------------
+    # Loop Detection / Retry Attempts Persistence
+    # -------------------------------------------------------------------------
+
+    def record_loop_attempt(
+        self,
+        session_id: str,
+        gate_id: str,
+        failure_signature: str,
+        turn_id: str | None = None,
+    ) -> int:
+        """Record or update a repeated failure attempt, filtering out duplicate turn_ids."""
+        now_str = datetime.now(timezone.utc).isoformat()
+        with self.transaction() as conn:
+            row = conn.execute(
+                """
+                SELECT attempt_count, last_turn_id
+                FROM loop_attempts
+                WHERE session_id = ? AND gate_id = ? AND failure_signature = ?;
+                """,
+                (session_id, gate_id, failure_signature),
+            ).fetchone()
+
+            if row:
+                current_count = int(row["attempt_count"])
+                last_turn = row["last_turn_id"]
+                if turn_id is not None and last_turn == turn_id:
+                    return current_count
+
+                new_count = current_count + 1
+                conn.execute(
+                    """
+                    UPDATE loop_attempts
+                    SET attempt_count = ?, last_attempt_at = ?, last_turn_id = ?
+                    WHERE session_id = ? AND gate_id = ? AND failure_signature = ?;
+                    """,
+                    (new_count, now_str, turn_id, session_id, gate_id, failure_signature),
+                )
+                return new_count
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO loop_attempts (
+                        session_id, gate_id, failure_signature, attempt_count, last_attempt_at, last_turn_id
+                    ) VALUES (?, ?, ?, ?, ?, ?);
+                    """,
+                    (session_id, gate_id, failure_signature, 1, now_str, turn_id),
+                )
+                return 1
+
+    def get_loop_attempt_count(
+        self,
+        session_id: str,
+        gate_id: str,
+        failure_signature: str,
+    ) -> int:
+        """Get the current count of failure attempts for a session, gate, and signature."""
+        conn = self.get_connection()
+        try:
+            row = conn.execute(
+                """
+                SELECT attempt_count
+                FROM loop_attempts
+                WHERE session_id = ? AND gate_id = ? AND failure_signature = ?;
+                """,
+                (session_id, gate_id, failure_signature),
+            ).fetchone()
+            return int(row["attempt_count"]) if row else 0
+        finally:
+            conn.close()
+
+    def reset_loop_attempts(self, session_id: str, gate_id: str | None = None) -> None:
+        """Reset failure attempt counters for a session."""
+        with self.transaction() as conn:
+            if gate_id:
+                conn.execute(
+                    "DELETE FROM loop_attempts WHERE session_id = ? AND gate_id = ?;",
+                    (session_id, gate_id),
+                )
+            else:
+                conn.execute(
+                    "DELETE FROM loop_attempts WHERE session_id = ?;",
+                    (session_id,),
+                )

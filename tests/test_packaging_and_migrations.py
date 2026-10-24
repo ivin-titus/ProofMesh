@@ -193,30 +193,33 @@ def test_atomic_migration_rollback_on_failure(tmp_path: Path, monkeypatch):
 
     # First apply valid migrations
     apply_migrations(conn)
-    assert get_current_schema_version(conn) == 1
+    assert get_current_schema_version(conn) == len(get_available_migrations())
 
-    # Create a mock failing migration file 002_fail.sql
+    # Create a mock failing migration file with next sequential version
     mock_migrations_dir = tmp_path / "mock_migrations"
     mock_migrations_dir.mkdir()
     (mock_migrations_dir / "001_init.sql").write_text(
         "CREATE TABLE IF NOT EXISTS test_t1 (id INT);", encoding="utf-8"
     )
-    # 002 has valid statement followed by a syntax error
+    # Next migration has valid statement followed by a syntax error
     (mock_migrations_dir / "002_fail.sql").write_text(
         "CREATE TABLE test_partial (id INT); INVALID SQL SYNTAX HERE;", encoding="utf-8"
     )
 
+    # Start from version 1 with mock migrations
+    conn_mock = sqlite3.connect(":memory:", isolation_level=None)
     monkeypatch.setattr("proofmesh.storage.migrations.MIGRATIONS_DIR", mock_migrations_dir)
+    conn_mock.execute("PRAGMA user_version = 1;")
 
     with pytest.raises(MigrationError):
-        apply_migrations(conn)
+        apply_migrations(conn_mock)
 
     # user_version must remain 1 (not bumped)
-    assert get_current_schema_version(conn) == 1
+    assert get_current_schema_version(conn_mock) == 1
 
     # Partial table test_partial must NOT exist (rolled back)
     tables = [
         r[0]
-        for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table';").fetchall()
+        for r in conn_mock.execute("SELECT name FROM sqlite_master WHERE type='table';").fetchall()
     ]
     assert "test_partial" not in tables

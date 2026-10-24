@@ -26,10 +26,17 @@ class RepoSnapshot(FrozenModel):
     git_dirty: bool = False
     files: tuple[FileFingerprint, ...] = Field(default_factory=tuple)
     captured_at: datetime
+    complete: bool = True
+    observation_errors: tuple[str, ...] = Field(default_factory=tuple)
 
     @field_validator("files", mode="before")
     @classmethod
     def convert_files(cls, v: object) -> object:
+        return to_immutable_tuple(v)
+
+    @field_validator("observation_errors", mode="before")
+    @classmethod
+    def convert_observation_errors(cls, v: object) -> object:
         return to_immutable_tuple(v)
 
     @field_validator("captured_at")

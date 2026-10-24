@@ -137,3 +137,68 @@ All models inherit from `FrozenModel` and enforce strict validation and immutabi
   - Invokes core services (`proofmesh.core`); zero duplicated policy logic.
 - `antigravity.py`:
   - Connects Antigravity host hook payloads to ProofMesh engine.
+
+---
+
+## 5. Stabilization & PRD Conformance Contracts (Pre-Parallel Work)
+
+### 5.1 Trusted Policy Loading, Identification, and Session Pinning
+- **Resolver**: Single authoritative resolver in `proofmesh.config`:
+  `resolve_trusted_policy(policy_path_override: Path | str | None = None) -> tuple[TrustedPolicy, Sha256Digest]`
+- **Resolution Order**:
+  1. `policy_path_override` if explicitly passed by programmatic caller.
+  2. `PROOFMESH_POLICY` environment variable if set (pointing to an external trusted TOML file strictly outside the target workspace).
+  3. Packaged default policy from `proofmesh.resources/default-policy.toml`.
+  - Target workspace-internal `policy.toml` is **not** trusted after agent execution starts.
+- **Canonical Digest**:
+  - `policy_digest = f"sha256:{hashlib.sha256(json.dumps(policy.model_dump(mode='json'), sort_keys=True, separators=(',', ':')).encode('utf-8')).hexdigest()}"`
+  - All-zero placeholder digests are rejected.
+  - `session.policy_digest` is pinned on session creation.
+  - Every evaluation, verification, and completion claim verifies `current_policy_digest == session.policy_digest`. Mismatches trigger `UNKNOWN` or `BLOCK`.
+
+### 5.2 Explicit Representation of Incomplete Repository Observation
+- **`RepoSnapshot` Fields**:
+  - `complete: bool = True`
+  - `observation_errors: tuple[str, ...] = Field(default_factory=tuple)`
+- **Observation Failure Semantics**:
+  - Symlink escaping `repo_root`, cyclic symlink loops, unreadable files (`PermissionError`/`OSError`), or failed/timed-out Git subprocesses add an error entry to `observation_errors` and set `complete = False`.
+  - External symlinks are never followed outside `repo_root`.
+  - If `snapshot.complete` is `False`, the Evaluator fails closed (`BLOCK` or `UNKNOWN`) and cannot evaluate to `ALLOW`.
+
+### 5.3 Evidence Eligibility for Evaluator
+Evidence is only eligible for evaluation if:
+1. `evidence.session_id == session.session_id`
+2. `evidence.contract_revision == session.contract_revision`
+3. `evidence.gate_id` exists in the union of `task_revision.required_gates` and `trusted_policy.gates` (mandatory gates).
+4. `evidence.config_digest` matches the gate policy digest in `trusted_policy.gates`.
+5. `evidence.snapshot_after == current_snapshot.snapshot_id` (code-bound snapshot freshness).
+6. Incomplete snapshots (`current_snapshot.complete is False`) disqualify passing evaluations.
+7. Only the latest eligible evidence record per gate (by `ended_at`) is evaluated.
+
+### 5.4 Project and Workspace Session Resolution
+- Every session lookup must be scoped by `(project_id, repo_root)`.
+- `ProofMeshStore.get_session(session_id, project_id=None, repo_root=None)`:
+  Validates that `session_id` belongs to `project_id` and `repo_root`. Mismatched project/directory returns `None` or raises `ValueError`.
+- `ProofMeshStore.get_active_session_for_project(project_id, repo_root=None)`:
+  Queries the latest active session explicitly filtered by `tasks.project_id = ?` and `sessions.repo_root = ?`.
+- Picking the latest row from `sessions` without project and workspace validation is strictly forbidden.
+
+### 5.5 Verdict Terminology & Presentation Mapping
+- **Internal / Domain Model (`VerdictOutcome`)**:
+  - `ALLOW = "allow"`
+  - `BLOCK = "block"`
+  - `REQUIRE_APPROVAL = "require_approval"`
+  - `WARN = "warn"`
+  - `UNKNOWN = "unknown"`
+- **Presentation / Report Mapping**:
+  - `ALLOW` -> `ACCEPTED` (Badge: `✅ ALLOW / ACCEPTED`)
+  - `BLOCK` -> `BLOCKED` (Badge: `❌ BLOCK / BLOCKED`)
+  - `REQUIRE_APPROVAL` -> `NEEDS_APPROVAL` (Badge: `⚠️ REQUIRE_APPROVAL / NEEDS_APPROVAL`)
+  - `UNKNOWN` -> `UNKNOWN` (Badge: `❓ UNKNOWN`)
+
+### 5.6 Continuation / Retry Budgets Surviving Invocations
+- Loop failure attempts are tracked by `(session_id, gate_id, failure_signature)` and persisted in SQLite.
+- Duplicate event deliveries (same host turn or identical evidence) do not consume budget.
+- Once retries reach `budget.max_retries`:
+  - `LoopDetector.is_budget_exhausted()` returns `True`.
+  - Stop hook allows host termination (`allow`) to prevent infinite model loops, but ProofMesh retains `VerdictOutcome.BLOCK` with handoff explaining budget exhaustion.
