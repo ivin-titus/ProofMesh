@@ -41,7 +41,7 @@ Testing, code review, agent governance, MCP tooling, and lifecycle hooks exist i
 
 **Rules files vs enforcement:** AGENTS.md and similar files are advice; agents, especially smaller models on large changes, ignore them. ProofMesh turns the same rules into deterministic checks, write-time hook decisions and acceptance verdicts.
 
-**What it adds that skills and rule files don't:** evidence-cited completion (every acceptance criterion must cite fresh, passing evidence), stepwise refactors with a change budget, task state re-injected after context loss or agent switch, focused failure digests with loop detection, and a verdict + receipt on the PR that holds even when an agent has no hooks (TRD §6.6, §13.7).
+**Long-term differentiators beyond skills and rule files:** evidence-cited completion, stepwise refactors with a change budget, task-state re-anchoring after context loss or an agent switch, focused failure digests with loop detection, and a verdict/receipt that travels with a PR. These describe the broader product direction; the MVP subset is limited by §6 and §9 and the TRD scope lock.
 
 **Agent-neutral long-term goal:** one stable core exposed through MCP, with native hooks where supported and a CI acceptance gate for workflows that produce commits/PRs. The MVP validates one host integration; universal install, multiple native adapters, and CI enforcement are roadmap items.
 
@@ -343,7 +343,7 @@ Use a prepared sample repository with an intentional scope/verification failure.
 
 ### Optional live extension
 
-If the core is stable, run one of the same checks against the developer's real social-media project through Antigravity. Then choose **one** stretch feature: a Playwright UI smoke test or a narrow decision-advisor call. Do not depend on the real repository or a live model making a particular mistake for the main story.
+If the core is stable, run one of the same checks against the developer's real social-media project through the host selected and verified in the integration spike. Antigravity is a candidate, not a prerequisite. Then choose **one** stretch feature: a Playwright UI smoke test or a narrow decision-advisor call. Do not depend on the real repository or a live model making a particular mistake for the main story.
 
 Keep a recorded run and exported reports as backup; label any seeded/replayed events. The decision model, if shown, is advisory only and must never replace the deterministic verdict.
 
@@ -369,9 +369,9 @@ The long-term ecosystem is an intent-to-evidence continuity layer across agent h
 - Python 3.14 is the implementation language; Pydantic v2 (strict) provides runtime validation.
 - ProofMesh is a native Python package (no Docker in the runtime path).
 - SQLite is the only store; scope is limited to what the hackathon demo needs.
-- The submission is evaluated by a jury and an AI code reviewer.
+- The event's judging and review format is set by its organizers; this product specification does not assume a particular review tool or judging process.
 - Detailed decisions and open questions are tracked in TRD §23.
-- One native lifecycle integration is the target; the first compatibility spike chooses the host. Antigravity VS Code is the preferred demo target, but if the actual hook contract cannot be verified quickly, use a host whose hook can be demonstrated and report all other integrations as unsupported/partial.
+- One native lifecycle integration is the target; the first compatibility spike chooses the host. Antigravity may be tested first if already available, but it is not a requirement. If the hook contract cannot be verified quickly, use another host with a demonstrable integration or report the supported path as partial/unguarded.
 - The MVP does not provide formal correctness proofs.
 - User approval can be represented by an explicit local CLI/UI action plus a contract digest; cryptographic identity is future work.
 - A completion hook may request continuation but cannot guarantee that the agent will obey forever or prevent a separate chat message claiming completion.

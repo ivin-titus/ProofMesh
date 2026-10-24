@@ -1,5 +1,13 @@
 # Change log
 
+## 2026-10-24T22:31:24+05:30 — Remove optional template scaffolding and reconcile MVP scope
+
+- **Changed:** Removed standalone `RULES.md` and the optional GitHub pull-request template. Folded essential workflow guidance into `AGENTS.md`; refreshed README and submission notes; removed template-specific event caveats; clarified Devin/ChatGPT contributions in `AI_USAGE.md`. Corrected TRD statements that promoted deferred refactor/CI features to MVP scope, clarified the future-only CI/PR gate and plugin installation notes, removed unconfirmed assumptions about an AI code reviewer, and converted the stale wall-clock schedule to relative time boxes.
+- **Why:** The project can keep its own clear documentation structure without requiring a borrowed hackathon template. PRD, TRD, build plan, and current status should describe the same MVP.
+- **Validation:** Searched current documentation for old template references, deleted-file links, contradictory MVP labels, unsupported judging-format claims, and stale wall-clock schedule wording. Checked that PRD §6/§9, TRD §0/§20, and the build plan use the same MVP boundary.
+- **Test result:** Documentation-only change; no runtime tests were run because application implementation has not started.
+- **Limitations:** The event deadline remains a planning assumption from current project notes and should be checked against current organizer communications.
+
 ## 2026-10-24T22:26:23+05:30 — Organize specifications under docs/
 
 - **Changed:** Moved the PRD to `docs/PRD.md`, the TRD to `docs/TRD.md`, and the event-track PDF to `docs/BUILD_TRACKS.pdf`. Updated README/agent/build-plan links and added a direct link to the track reference. Expanded `AI_USAGE.md` to record the earlier Devin-assisted ideation/specification work, separately from Git commit authorship.

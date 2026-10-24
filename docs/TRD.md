@@ -153,7 +153,7 @@ ProofMesh has no server, background process or model of its own. The host starts
 - **Hooks:** at each hook event the host runs `uvx proofmesh==<pinned> hook <event> --host <name>`: a short-lived Python process that reads JSON from stdin, answers on stdout and exits.
 - **MCP:** the host starts `proofmesh mcp` (stdio) when an agent session opens and stops it when the session ends.
 - **State:** the SQLite file in the per-user data directory (§14) carries state between these processes.
-- **PR gate:** `proofmesh verify --ci` runs in the repository's CI (GitHub Actions is free for public repositories).
+- **Future CI gate (not MVP):** `proofmesh verify --ci` could run in the repository's CI. CI/PR status checks and comments are explicitly deferred; the core demo does not depend on a PR gate.
 - **Intelligence:** all reasoning about code comes from the host agent's own model. ProofMesh is deterministic code: contracts, snapshots, trusted checks, evaluator.
 
 Target footprint: tens of MB of RAM per process (to be measured), so it fits the developer's 8 GB RAM / i3 laptop with no GPU and a zero budget. Running the project's own tests is the heavy part, not ProofMesh.
@@ -538,17 +538,15 @@ forbid_imports = ["fastapi", "app.routes"]
 
 ### 6.6 What ProofMesh adds beyond rule files and skills
 
-Skills, rules and AGENTS.md tell an agent what to do. Hook scripts on the market block single commands. Neither keeps a task honest end to end. These are the capabilities ProofMesh adds; each is deterministic and testable:
+These are product differentiators, but they are not all MVP commitments. The authoritative MVP scope is §0 and the definition of done is §20.
 
-1. **Evidence-cited completion.** An agent cannot just say "done". It calls `claim_complete(task_id, claims)` where each claim names an acceptance criterion and the evidence IDs that prove it. ProofMesh checks every citation: the evidence exists, belongs to this contract revision, is fresh for the current snapshot, and actually passed. Uncited criteria, stale or failed citations and mismatched gates are returned as a short list. The Stop hook replies with the same list. Result: the agent's summary and the evidence cannot disagree without it being visible.
-2. **Stepwise refactors with a change budget.** Large changes are where agents break architecture. A `refactor` TaskFile can list ordered steps; only the current step's scope is writable, and step N+1 unlocks only when step N is verified (invariants green, rules pass, no regressions). Each step has a budget (`max_files`, `max_changed_lines`); going over it asks the developer instead of letting a 40-file rewrite through. Weaker models do better with small, verified steps.
-3. **Context re-anchoring.** Long sessions lose the contract when context is compacted or the agent is switched. ProofMesh holds task state outside the chat and re-injects a compact state card (objective, current step, open criteria, blockers, stale evidence) at session start, after compaction (`PostCompaction` / `PreCompact` where the host has it) and before each model call where supported. The same card is the handoff packet when work moves to another agent (e.g. Antigravity → Devin).
-4. **Focused failure feedback and loop fingerprints.** Instead of passing raw logs back, ProofMesh returns a digest: first failing test, file:line, rule ID, and what changed since the last attempt. Normalized failure fingerprints detect "same failure again" and "edits with no progress"; after the budget, automatic retries stop and the developer gets the handoff.
-5. **A verdict that travels with the change.** `proofmesh verify --ci` re-runs the trusted gates on the PR head, checks the contract and evidence, and posts the verdict as a status check plus a short PR comment, with a machine-readable receipt (contract digest, snapshot hash, gate results, criterion→evidence map). Human reviewers, the jury and AI reviewers (e.g. Devin Review) read the receipt instead of trusting the agent's summary. It works even for agents with no hooks at all.
+1. **Evidence-cited completion — MVP in a bounded form.** The evaluator links required criteria/gates to evidence tied to the active contract revision and relevant code state. It blocks acceptance when mandatory evidence is missing, failed, stale or unknown. A separate PR receipt is future work.
+2. **Stepwise refactors and change budgets — future.** A later refactor workflow may unlock ordered steps after invariants pass and may enforce file/line budgets. The MVP does not orchestrate multi-step refactors or enforce change budgets.
+3. **Context re-anchoring — MVP handoff only.** The MVP provides a compact state card/handoff with contract revision, blockers, code state, relevant failures and next actions. Automatic injection after compaction or before every model call is host-specific future work.
+4. **Focused failure feedback and loop detection — MVP.** Summarize the relevant failure, detect repeated normalized failures/no progress, bound retries, and create a useful handoff.
+5. **Verdict/receipt on the change through CI/PR — future.** A later `proofmesh verify --ci` can rerun trusted gates against a PR snapshot and publish a status/receipt. This is deferred; CI/PR gating is not required for the MVP.
 
-All five are approved for the MVP (D-25); if time is short, #2 is cut first.
-
-Out of scope for the MVP: LLM judging of acceptance, agent orchestration, writing code.
+Out of scope for the MVP: LLM judging of acceptance, agent orchestration, writing code, stepwise refactor orchestration, universal installation, and CI/PR verdict posting.
 
 ## 7. Repository snapshot and scope analysis
 
@@ -752,7 +750,443 @@ Notes:
 - **Weaker models** drift on large changes and ignore long rule files (AGENTS.md). ProofMesh keeps injected text short and specific, blocks rule-breaking writes at the moment they happen, and turns the stop event into "not done: X is missing", with exact gate and file names.
 - **No host loop flag** on `Stop` (unlike Codex `stop_hook_active`). Loop safety relies on ProofMesh's own continuation budget per contract revision and snapshot, plus no-progress detection.
 - **Never use `overwrite`** (argument rewriting). ProofMesh allows, denies or asks; it does not silently change what the agent does.
-- **Hook config is inside the workspace** (`.agents/hooks.json`). ProofMesh is installed as a **global plugin** (§13.5), not workspace hooks, and ProofMesh treats `.agents/hooks.json`, `.agents/mcp_config.json` and its own policy as protected paths. A changed hook config at runtime drops enforcement health to `UNGUARDED` and shows in the report.
+- **Hook config may be workspace-level or user-level depending on the selected host.** For the MVP, use documented manual configuration for the one verified host; do not assume ProofMesh has been installed as a global plugin. Where relevant, treat `.agents/hooks.json`, `.agents/mcp_config.json` and the trusted policy as protected configuration. A changed active integration config drops enforcement health to `UNGUARDED` and appears in the report.
+- Shell commands (`run_command`) can still change files without a write tool. The snapshot diff after each tool call catches these after the fact; this is detection, not prevention, and the report says so.
+- MCP: same stdio server, registered in `~/.gemini/config/mcp_config.json` (global) or `.agents/mcp_config.json` (workspace) with `command`/`args`.
+
+- **VS Code extension:** the developer reports that it loads globally installed plugins (e.g. Google Docs/Calendar plugins show up). Hook firing and payload shapes are still captured as golden files in §19 step 0.
+
+### 13.4 Hook performance and failure behaviour
+
+- Antigravity's default hook timeout is 30 s, and hooks block the agent. ProofMesh hooks stay fast: `PreToolUse`, `PostToolUse`, `PreInvocation` do path/hash work only (target < 200 ms).
+- Test suites never run inside `PreToolUse`. Checks run through the MCP tool `run_verification` (or the CLI); the `Stop` hook evaluates the evidence that exists and, if it is missing or stale, answers `continue: run run_verification for gates X, Y`. The `Stop` handler gets a longer `timeout` only for baseline runs at session start, if needed.
+- **If ProofMesh itself fails** (crash, invalid payload, timeout): writes to protected paths fail closed (`deny`); other tool calls fail open (`allow`) so a ProofMesh bug cannot freeze the developer's agent; the `Stop` hook never reports acceptance; the failure is recorded and enforcement health drops to `PARTIAL`.
+
+### 13.5 Distribution: portable plugin package — future packaging design
+
+The long-term distribution goal is to keep the core package agent-neutral and ship host manifests, MCP configuration, an Agent Skill and hook mappings from a versioned plugin folder where hosts permit this.
+
+**Not in the hackathon critical path:** universal repo-link installation, a cross-host installer, complete uninstall/doctor behavior, multiple co-located hook layouts, version signing, or support claims for every host. The MVP can use a documented manual MCP/hook configuration for the one selected host. Prefer a pinned package command and exact setup notes over building an installer.
+
+Future plugin packaging can include:
+- Host-specific manifest and hook configuration.
+- A portable SKILL.md for guidance-only integrations.
+- Version-pinned commands and an explicit uninstall procedure.
+- A doctor/report command that verifies what the host actually loaded.
+- Golden-file adapter tests for real captured event payloads.
+- A clear distinction between Skill guidance, MCP access, native hook steering, and independent CI gating.
+
+Do not assume a single directory layout is compatible with every host. Verify each host's actual manifest precedence and plugin loader before claiming portability.
+
+### 13.6 Enforcement caveat
+
+MCP-only mode is advisory. A lifecycle hook can request continuation only to the extent the host supports and honors it. Git/CI gates can enforce merge policy independently. A local agent can still claim completion in chat; ProofMesh governs its own acceptance state, not arbitrary text in the host conversation.
+
+### 13.7 Three layers: guide, steer, gate
+
+ProofMesh separates three strengths of integration. They are architecture levels, not three features that must all ship tonight.
+
+| Layer | Mechanism | Strength | Hackathon status |
+|---|---|---|---|
+| Guide | MCP tools + compact state card/Agent Skill | Provides task, status, evidence and focused handoff; agent may ignore it | Required core interface plus one real client connection |
+| Steer | Native lifecycle hooks | Can block/request continuation only where host semantics support it | One verified host hook targeted |
+| Gate | Independent CI status check/receipt | Can gate repository integration when configured as a required check; does not stop local edits or chat claims | Future; explicitly not required for MVP |
+
+The final report must state which layers are active and what they can actually enforce. A Skill is guidance, not enforcement; MCP by itself is not a guarantee. A CI gate re-runs trusted checks against the target PR snapshot and must not trust agent-uploaded evidence.
+
+### 13.8 Optional advisor: lightweight decision models (stretch only, off by default)
+
+**Scope status:** This is not part of the critical path. Implement it only after the deterministic end-to-end demo works twice from a clean state; otherwise leave the existing interface/design as roadmap. The advisor can add a warning or request review, but it can never emit acceptance or override a mandatory gate.
+
+Some useful questions are fuzzy and can't be answered by rules alone: "is this agent message a completion claim?", "does this new test assert behaviour?". An **advisor** is an optional external decision model that answers such typed questions. ProofMesh only calls it; it never installs, hosts or trains a model.
+
+**Protocol:** the `POST /v1/systemone` decision protocol used by TypeSafe's hosted Jev API and served by the open-source Laya (`laya-serve`). Questions are typed: `noul` (yes/no probability), `score`, `choice`. One client covers both self-hosted Laya and the hosted API.
+
+```toml
+# policy.toml (trusted; developer-owned)
+[advisor]
+enabled = false
+protocol = "systemone"
+url = "http://127.0.0.1:8000/v1/systemone"   # laya-serve, or a hosted endpoint
+api_key_env = "PROOFMESH_ADVISOR_KEY"        # optional; name of an env var, never the key itself
+timeout_ms = 2000
+```
+
+**Rules that keep ProofMesh a tool, not a harness:**
+
+1. **Escalate only.** An advisor answer can add `WARN` or `REQUIRE_APPROVAL` (ask the developer). It can never produce `ALLOW`, clear a blocker or mark a task `ACCEPTED`. The deterministic evaluator (§11) stays the only judge.
+2. **Fail-safe.** Unreachable, slow, malformed or invalid responses (validated with Pydantic like every other input, §5.6) are ignored, recorded, and change nothing.
+3. **Recorded as advisory evidence.** Each answer is stored with the question, the advisor URL/model, the probability and the threshold used, labelled `ADVISORY` in reports.
+4. **Thresholds are trusted policy.** The developer sets the threshold per question; ProofMesh compares the probability deterministically.
+5. **Off the hot path.** Never called from `PreToolUse`/`PostToolUse`. Only at Stop, in `proofmesh verify --ci`, or on demand (`proofmesh review`).
+6. **No code or task text leaves the machine** unless the developer points `url` at a remote endpoint; `proofmesh doctor` shows where advisor calls go.
+
+**First questions (all advisory):**
+
+| ID | Type | Question | Effect if above threshold |
+|---|---|---|---|
+| ADV-1 | `noul` | Does the agent's final message claim the task is done or tests pass? | trigger the claim check (§6.6 #1) in hosts without `claim_complete` |
+| ADV-2 | `noul` | Does this new/changed test assert the behaviour named in the criterion? | `WARN`; Strict profile → `REQUIRE_APPROVAL` |
+| ADV-3 | `choice` | Does this amendment narrow, keep or widen scope? | widen → always ask the developer |
+| ADV-4 | `noul` | Does this rejected change suggest a reusable architecture rule? | propose a rule draft for the developer |
+
+**Measured (2026-10-24, Devin VM, Intel Xeon, CPU only, English checkpoint, laya 0.4.14):**
+
+| Threads | p50 per call (2 `noul` questions) | Peak RSS | Download | Install size |
+|---|---|---|---|---|
+| 2 | ~832 ms | ~2.8 GB | 808 MB | ~1.1 GB (PyTorch CPU + transformers) |
+| 4 | ~673 ms | ~2.8 GB | | |
+
+Sample: "I refactored the feed service … All tests pass and the task is complete." → claims done 0.822, claims tests pass 0.858. Not measured on the developer's i3 laptop. Laya's own docs report GPU latency ~33 ms, base checkpoints below the majority-class baseline on its typed-decision benchmark (fine-tuning provides the capability), and over-confident probabilities until recalibrated. Third-party figures quoted in Laya's repo put hosted Jev at ~236–276 ms p50. Conclusion: workable on 8 GB but heavy next to an IDE; suitable for Stop/CI/on-demand use only, and the advisor's accuracy must be checked on ProofMesh's own labelled examples before any threshold is trusted.
+
+**Zero-budget options, in order:** (1) no advisor (MVP default; the demo needs none); (2) the host agent's own model via MCP sampling or Devin CLI prompt hooks, which is free but host support is unverified; (3) self-hosted Laya on the developer's machine; (4) a hosted decision or LLM API with a free tier, subject to its limits.
+
+## 14. Storage (SQLite only)
+
+**Decision (D-4, revised): SQLite only**, standard-library `sqlite3`, hand-written parameterized SQL. No Postgres/Neon, no ORM, no migration framework.
+
+Why SQLite rather than plain JSON files: both cost zero dependencies, but the MCP server, hook processes and CLI can write at the same moment. JSON files would need hand-rolled locking and atomic-rename logic to avoid lost or corrupted writes, plus hand-written indexing for queries like "latest evidence for gate X at snapshot Y". SQLite provides transactions, WAL concurrency and integrity checks for free. JSON is still used for **exports** (`proofmesh report --format json`), which reviewers and other tools can read directly.
+
+### 14.1 Logical schema
+
+- `projects(project_id, root_path, created_at)`
+- `tasks(task_id, project_id, created_at)`
+- `task_revisions(task_id, revision, canonical_json, digest, raw_markdown, raw_digest, approval_status, decided_by, decided_at, decision_reason)`
+- `task_proposals(proposal_id, task_id, base_revision, raw_markdown, submitted_by, submitted_at, decision, decision_reasons_json)`
+- `sessions(session_id, task_id, revision, baseline_snapshot_id, policy_digest, profile, integration_status, state, started_at, ended_at)`
+- `events(event_id, session_id, source, event_type, occurred_at, payload_json, snapshot_before, snapshot_after, prev_hash, row_hash)`
+- `snapshots(snapshot_id, session_id, manifest_digest, manifest_json, captured_at)`
+- `evidence(evidence_id, session_id, task_revision, gate_id, provider, status, snapshot_before, snapshot_after, started_at, ended_at, exit_code, summary_json, artifact_refs_json, prev_hash, row_hash)`
+- `verdicts(verdict_id, session_id, evaluated_at, verdict, reasons_json, snapshot_id, contract_revision, enforcement_level, prev_hash, row_hash)`
+- `approvals(approval_id, session_id, action, target_revision, actor, reason, created_at, prev_hash, row_hash)`
+
+JSON columns are `TEXT` holding canonical JSON; timestamps are UTC ISO-8601 `TEXT`. Add indexes for `session_id`, timestamps, task/revision, and gate/status lookups. Every row is re-validated through its Pydantic model when read.
+
+### 14.2 Query layer and migrations
+
+- One module (`storage/store.py`) owns all SQL. Queries are hand-written and **always parameterized** (`?` placeholders); no string-formatted SQL. Each function returns validated Pydantic models, never raw rows.
+- Migrations are ordered SQL files (`migrations/001_init.sql`, …). On start-up ProofMesh reads `PRAGMA user_version`, applies missing files inside a transaction, and bumps the version. A DB with a newer version than the code understands is refused (exit `3`).
+- Writes use short explicit transactions (`BEGIN IMMEDIATE`) so concurrent processes serialize cleanly.
+
+### 14.3 Keeping the `.db` file safe
+
+- **Location:** `${PROOFMESH_HOME:-$XDG_DATA_HOME/proofmesh}` (default `~/.local/share/proofmesh/` on Linux, platform equivalent on macOS/Windows), one DB per registered project: `<data-dir>/projects/<project-id>/proofmesh.db`. Never inside the target repository, so the agent cannot accidentally edit, delete or commit it, and it never appears in diffs.
+- **Permissions:** directory `0700`, files `0600` (process `umask 077`).
+- **Connection PRAGMAs:** `journal_mode=WAL`, `synchronous=FULL` (durability of evidence/verdicts over raw write speed; revisit if slow), `foreign_keys=ON`, `busy_timeout=5000`, `trusted_schema=OFF`.
+- **Start-up checks:** `PRAGMA quick_check` and schema-version check; refuse to run (exit `3`) on corruption instead of writing to a damaged DB.
+- **Filesystem caveat:** SQLite WAL is not supported on network filesystems; refuse or warn if the data dir is on one.
+- **Backups:** `proofmesh db backup` uses `sqlite3.Connection.backup()` to write a consistent timestamped copy under `<data-dir>/backups/`; never `cp` the live `.db` while `-wal`/`-shm` files exist. `proofmesh db restore` validates integrity and schema version first.
+- **Tamper evidence:** append-only tables (`events`, `evidence`, `verdicts`, `approvals`) carry a hash chain: `row_hash = sha256(prev_hash || canonical_json(row))`. `proofmesh db verify` walks the chain and reports breaks.
+- **Honest limitation:** an agent running as the same OS user *can* reach the data dir with its shell. Keeping the DB outside the repo prevents accidental/drive-by edits; the hash chain *detects* row edits unless the whole chain is rebuilt; it does not *prevent* a determined process with the same privileges. Stronger isolation (separate OS user, sandboxed agent) is future work and must not be claimed in the demo.
+- **Encryption at rest:** not in MVP; rely on host disk encryption.
+- **Artifacts:** bounded check output and screenshots under `<data-dir>/projects/<project-id>/artifacts/` with controlled file names and configured retention.
+
+## 15. CLI commands
+
+Only implement commands required for the demo and basic diagnosis. Keep the command layer thin; it delegates to core services.
+
+```text
+proofmesh demo                         # seeded end-to-end demo; no model/network needed
+proofmesh task propose --file TASK.md
+proofmesh task approve <task-id> --revision <n>
+proofmesh task show <task-id>
+proofmesh session start <task-id>
+proofmesh inspect <session-id>
+proofmesh verify <session-id> [--gate <gate-id>]
+proofmesh status <session-id>
+proofmesh handoff <session-id>
+proofmesh claim-complete <session-id>
+proofmesh hook <event-name> --host <host>
+proofmesh mcp
+proofmesh report <session-id> --format md|json
+proofmesh doctor
+```
+
+Commands such as universal install/uninstall, broad project initialization, PR commenting, advanced policy editing, optional advisor invocation, and database backup/restore are future/stretch work unless an existing implementation makes them nearly free.
+
+Use explicit exit codes: `0` accepted/check pass; `1` policy blocker or failed check; `2` invalid input/configuration; `3` unknown or unavailable verification/enforcement. Never collapse `UNKNOWN` into exit code `0`.
+
+## 16. Security and privacy
+
+- Treat repository files, README instructions, logs, test output, MCP tool arguments and agent summaries as untrusted input.
+- Separate trusted policy from agent-writable files; record policy digest at session start.
+- Validate repository path containment to prevent path traversal and symlink escapes where possible.
+- Use allowlisted gates, command argument arrays, timeouts, capped output and minimal environment variables.
+- Do not make destructive file changes or automatically roll back the worktree.
+- Avoid capturing secrets from environment or logs; redact likely credentials and offer local-only retention.
+- Protect artifacts from path traversal; do not allow a model-supplied artifact path to read arbitrary files.
+- Local stdio transport avoids exposing a listening network server in MVP; remote transport requires additional controls.
+- ProofMesh never writes to the workspace; check subprocesses get a minimal environment, a controlled working directory and `/tmp`-redirected caches where the tool supports it.
+- Database and artifacts live in the per-user data directory (`0700`/`0600`), outside the agent-writable workspace; all SQL is parameterized.
+- Agents cannot create or change TaskFiles directly; only ProofMesh decisions (policy rule or user approval) produce revisions (§6).
+- All external input is validated by strict Pydantic models with size caps before use (§5.6); the TaskFile parser rejects unknown sections, invalid TOML and duplicate keys.
+- Test scripts remain potentially arbitrary code. Only run the prepared demo app for the event; future untrusted-repository support requires a sandbox or a clear opt-in security boundary.
+
+## 17. Observability and performance
+
+- Every operation has a session/event ID and bounded duration.
+- Prefer incremental status reads and avoid repeated full transcript/diff uploads.
+- Store a full repository fingerprint only when needed; later optimize with per-file/per-gate dependency fingerprints.
+- Browser tests are opt-in based on changed paths and configured UI gates; do not start a browser for backend-only changes.
+- Context handoffs should include exact relevant failure lines and references, not giant duplicated logs.
+- Record gate execution time, timeout rate, retries prevented, stale-evidence count, and adapter health for future evaluation.
+
+## 18. Testing plan
+
+### MVP unit tests (must-pass)
+
+- Approved TaskFile revisions cannot be mutated in place; amendment requires a recorded approval/decision.
+- A mandatory failed, missing, stale or unknown gate cannot produce `ACCEPTED`.
+- Evidence becomes stale after the relevant code fingerprint or contract revision changes.
+- A scope violation is reported against the active contract.
+- Repeated identical failures reach the retry budget; duplicate event delivery does not double-count the same event.
+- Invalid hook/MCP input and unknown gate IDs are rejected; the runner enforces timeout and output bounds.
+- SQLite records survive a new process and a failed transaction does not leave a half-written event/evidence/verdict.
+- The seeded demo produces the same expected verdict/report with no LLM or network dependency.
+
+### Extended unit and hardening inventory (future / only after MVP)
+
+- Canonical TaskFile hashing and immutable revision behavior.
+- User approval required for amendment; digest changes when required fields change.
+- Scope classifier identifies expected, unexpected, and restricted paths.
+- Evidence invalidates after contract or code fingerprint changes.
+- Evaluator blocks failed/stale mandatory gates and preserves `UNKNOWN`.
+- Loop detector catches repeated failure signatures and does not increment twice for the same event.
+- Retry budget is respected; no infinite continuation.
+- MCP schemas reject unknown gate IDs and oversized payloads.
+- Runner times out and captures bounded output.
+- Markdown TaskFile: valid file parses; unknown/duplicate headings, malformed AC lines, duplicate AC IDs, unknown gate IDs, invalid TOML / duplicate keys and oversized files are rejected with line numbers; `parse(render(m)) == m`; cosmetic whitespace edits keep the canonical digest stable.
+- Strict models reject coercible-but-wrong types, extra fields, naive datetimes, path traversal (`../`, absolute, symlink escape) and oversized collections; secrets never appear in `repr`/errors.
+- Storage: migrations apply in order and are idempotent; concurrent writers (two processes) do not lose writes; hash-chain verification detects a modified row; `quick_check` failure blocks start-up; backup/restore round-trips; no query uses string-formatted SQL (lint rule/grep test).
+- Decision matrix: each (decision, profile) cell in §6.1 behaves as specified; no profile turns a failed mandatory gate into `ACCEPTED`; waivers are labelled.
+- Baseline-relative evidence: pass→fail is a regression; fail→fail is reported as pre-existing; `bugfix` tasks without a fail-to-pass gate cannot be accepted; `refactor` tasks require `## Invariants`.
+- Test obligations: missing mapped tests → `BLOCK`; skipped/absent new tests detected from JUnit XML; fail-on-baseline check via temporary worktree; test-count drop, deleted tests and new skip/only markers → `REQUIRE_APPROVAL`.
+- `proofmesh init`: fixture repos (FastAPI/pytest, Node/Vitest, Go, unknown) produce the expected proposed policy; nothing is executed; values are labelled `detected`/`default`.
+- Architecture rules: `ast` checker catches `import x`, `from x import y`, relative imports and aliases; ignores strings/comments; reports file, line, rule ID.
+- Plugin bundle: `plugin.json` validates against the published schema; `hooks.json` commands point to the pinned version; hook handlers meet the latency budget; ProofMesh internal errors follow the fail-closed/fail-open rules (§13.4).
+- Antigravity adapter: golden files for every event (doc examples + payloads captured from the installed version); `Stop` continuation respects the budget; protected hook-config edits are denied and drop enforcement health.
+- Host adapters: recorded sample payloads for each supported host map to the same `HookEvent`; `HookDecision` maps back to valid host output (golden-file tests).
+- TaskFile ownership: agent `propose_task`/`propose_contract_amendment` never produces an approved revision without a policy rule or user approval; scope expansion is escalated; rejected proposals return reasons.
+
+### MVP integration tests (must-pass)
+
+- Start a session on a prepared repo, modify an out-of-scope file, and observe a scope finding.
+- Run a real failing configured check and observe `BLOCKED`.
+- Repeat the same failure to threshold and observe retry stop plus compact handoff.
+- Fix the issue, rerun checks, and reach `ACCEPTED` only after fresh evidence exists.
+- Modify source after a passing check and observe stale evidence.
+- Invoke the chosen host hook using an actual sample payload and validate host-specific response semantics.
+- Clean-environment smoke test: `uv run proofmesh demo` after dependencies are installed completes the seeded demo and writes report.md + report.json; the core demo needs no model/API call or network, and the target repository working tree is unchanged afterwards.
+
+### End-to-end demo test
+
+Use a prepared repository and a known task. The primary test is deterministic; the live host integration is tested separately. The test must not require an LLM to make a specific mistake. Seed the initial conditions and validate the real agent integration separately from any scripted/simulated multi-agent events.
+
+## 19. Implementation order and relative time budget
+
+Use elapsed-time boxes from the start/resumption of implementation; these are budgets, not promises. The schedule below totals 12 hours and is intended to fit the current planning window to the noted 11:00 IST deadline. If less time remains, cut stretch work and presentation polish first. Do not cut evidence/safety checks or the final submission buffer. Verify the current deadline with the organizers.
+
+| Relative time | Work | Exit checkpoint |
+|---|---|---|
+| T+00:00–00:25 | **Integration spike:** verify MCP request/response and one real hook payload/response for an available host. Antigravity may be tried first if already available, but is not mandatory. | One actual host path is demonstrated or the limitation/fallback is recorded. No multi-host work. |
+| T+00:25–01:00 | Package skeleton, strict models, config, SQLite schema/transactions. | Imports work; a storage round-trip test passes. |
+| T+01:00–01:50 | TaskFile parser, canonical digest, proposal/approval/revision service. | Contract approval and rejected silent amendment are tested. |
+| T+01:50–02:40 | Baseline/code fingerprint, changed-path report, basic scope policy. | Fixture's deliberate out-of-scope change is detected. |
+| T+02:40–03:40 | Allowlisted command runner, timeout/output bounds, evidence records and freshness invalidation. | A real check passes/fails and evidence becomes stale after an edit. |
+| T+03:40–04:20 | Deterministic evaluator, completion state, loop fingerprint and retry budget. | Failed gate blocks; repeat failure produces bounded intervention. |
+| T+04:20–05:00 | CLI end-to-end flow, persisted report and compact handoff. | Seeded demo works without MCP or LLM. |
+| T+05:00–06:00 | MCP tools backed by the same core; complete the one real host integration and verify response semantics. | Agent can retrieve status/request verification; actual enforcement is stated honestly. |
+| T+06:00–07:00 | Stabilize core integration; run clean-room demo twice, fix data/state bugs. | No manual DB edits or undocumented setup required. |
+| T+07:00–07:30 | **Optional single stretch:** one decision-advisor call (advisory only) OR one existing Playwright smoke test. | Drop immediately if it threatens core stability or needs significant setup. |
+| T+07:30–08:00 | Improve the report and README demo flow. | A reviewer can understand task, blocker, evidence and verdict quickly. |
+| T+08:00–09:15 | Unit/integration tests, static checks, security/timeout review, restart/persistence test. | Core passes after a fresh restart. |
+| T+09:15–10:00 | Rehearse the primary demo, record a fallback, and validate claims against working code. | One repeatable story with no reliance on model misbehavior. |
+| T+10:00–11:30 | Freeze features, fix only demo-breaking bugs, verify clean install/artifacts. | No new features after freeze. |
+| T+11:30–12:00 | Submission buffer. | Preserve a working build and submit using current organizer instructions. |
+
+ICTED`, or `UNKNOWN`.
+- Path mismatch is evidence of potential drift, not proof of incorrectness.
+- For an unexpected but plausibly related change, request a short justification; if high-risk or explicitly restricted, block or request approval according to policy.
+
+For MVP, path-based rules plus change summaries are adequate. Semantic dependencies and cross-language impact graphs are future work.
+
+## 8. Verification runner
+
+### 8.1 Security contract
+
+Never run arbitrary commands received from an LLM. A model may request a configured `gate_id`; trusted policy maps that ID to a known provider and fixed command/arguments.
+
+Runner requirements:
+
+- Use `subprocess` with argument arrays; avoid `shell=True`.
+- Use repository-root containment checks and a controlled working directory.
+- Enforce per-gate timeouts, output-size limits and cancellation.
+- Capture exit status, duration, bounded output and artifact references.
+- Redact likely secrets before persistence or display.
+- Do not pass the full environment or credentials to tests unless explicitly required by a trusted configuration.
+- Run only the prepared demo repository in the hackathon; later support sandbox/container isolation for untrusted repositories.
+
+### 8.2 Check execution order
+
+Use configured dependencies and cheap-to-expensive ordering:
+
+1. Policy/TaskFile integrity.
+2. Scope analysis.
+3. Static or syntax checks when configured.
+4. Existing unit/regression tests.
+5. API/integration checks when configured.
+6. Runtime/log checks when a managed test service exists.
+7. Browser smoke test only if UI-related paths changed and a browser gate is configured.
+
+A skipped or unavailable check produces `NOT_RUN` or `UNKNOWN`, not `PASSED`. The system must not invent a service URL or claim a runtime check happened if no test environment exists.
+
+### 8.3 Browser verification
+
+Reuse Playwright or an existing configured browser-test provider. Keep one workflow inside a single test run to avoid repeated model-driven browser interactions. Capture assertions, relevant failed requests, console errors and screenshot/trace references on failure.
+
+Trigger browser verification when configured UI paths change. If browser tooling or the app is unavailable, report that UI behavior remains unverified; decide whether this blocks acceptance based on the project's explicit gate policy.
+
+Use test credentials and a separate browser profile. Do not attach personal browser sessions or give untrusted agents unrestricted browser-side code execution.
+
+## 9. Evidence freshness
+
+At minimum, each check records a repository snapshot fingerprint before and after execution. If source files, relevant configuration, test definitions, or the contract change, evidence must be re-evaluated.
+
+MVP conservative rule:
+
+- Any change to a source/config/test path between check start and end => mark that check `STALE`.
+- Any subsequent code-state change after a passing check => mark evidence stale at task level and rerun mandatory gates before acceptance.
+- Any contract revision change => evidence tied to the prior revision cannot satisfy the new revision without explicit policy saying it remains applicable.
+
+Future enhancement: per-gate dependency fingerprints can avoid rerunning completely unrelated checks. Do not spend hackathon time implementing sophisticated semantic invalidation.
+
+## 10. Loop and compounding-error detector
+
+Use deterministic event/result signals. Do not depend on private model reasoning.
+
+### Inputs
+
+- Consecutive results from the same gate.
+- Normalized failure signature (exception class/message, assertion ID, error code, selected stable lines).
+- Relevant changed-file and diff fingerprints.
+- Number of outstanding failed mandatory gates.
+- Whether the newest attempt resolves, introduces, or leaves failures unchanged.
+- Hook continuation count and current `stop_hook_active`-style host signal when available.
+
+### Initial policy
+
+- Default repeated-failure threshold: 3 consecutive equivalent failures.
+- Default maximum automatic continuation attempts for the same blocking state: 3 (configurable).
+- Count progress only when an outstanding failure is resolved or a verifiable state improvement occurs; formatting or unrelated diffs alone are not progress.
+- At threshold, stop automatic retries and emit a focused diagnosis/handoff. Keep the task `BLOCKED` or `NEEDS_APPROVAL` if required evidence remains missing.
+- Do not keep requesting continuation forever. After budget exhaustion, permit the host turn to finish if required by its hook semantics while retaining a non-accepted verdict in ProofMesh.
+- Make evaluation idempotent: the same event and snapshot should not consume retry budget repeatedly.
+
+This is a heuristic, not proof that an agent is in an infinite loop. Provide the failure signature and reason so users can override a false positive.
+
+## 11. Policy evaluator and completion logic
+
+The policy evaluator is deterministic. Given the current contract revision, policy digest, relevant snapshot, evidence records, intervention state and adapter health, it returns a verdict plus reasons.
+
+Baseline decision rules:
+
+1. Unapproved/missing contract => `REQUIRE_APPROVAL` or `UNKNOWN`.
+2. Task/policy integrity violation => `BLOCK` or `REQUIRE_APPROVAL` per policy.
+3. Mandatory gate `FAILED` => `BLOCK`.
+4. Mandatory gate `STALE`, `NOT_RUN`, or `UNKNOWN` => `BLOCK`/`UNKNOWN`; never silently pass.
+5. Required integration unhealthy or absent => enforcement state `PARTIAL`/`UNGUARDED`; acceptance decision follows configured policy but must show the limitation.
+6. Scope findings that require justification remain unresolved until justified or approved.
+7. All mandatory gates current and passed, no unresolved blockers, required approvals complete => `ALLOW` for acceptance; product state may transition to `ACCEPTED`.
+8. Agent says “done” without adequate evidence => state `IMPLEMENTED`, not `ACCEPTED`.
+
+Keep two concepts separate: `completion_verdict` and `enforcement_capability`. A valid test result does not imply that the agent was prevented from bypassing the system.
+
+## 12. MCP surface
+
+Keep tool descriptions narrow and input schemas validated. Proposed tools:
+
+- `get_task_contract(task_id, revision?)` — read the approved contract (Markdown + structured model) and active digest.
+- `propose_task(draft_markdown)` — submit a new TaskFile draft; returns ProofMesh's decision (`REJECTED` with reasons, or `PENDING_APPROVAL`).
+- `propose_contract_amendment(task_id, draft_markdown, reason)` — submit an amendment; returns `REJECTED`, `ACCEPTED_BY_POLICY` or `PENDING_APPROVAL`. Never approves directly on the agent's say-so.
+- `inspect_changes(session_id)` — return changed paths and scope findings.
+- `run_verification(session_id, gate_ids?)` — run configured checks by ID only.
+- `get_completion_status(session_id)` — return state, blockers, evidence freshness, and enforcement capabilities.
+- `claim_complete(task_id, claims)` — each claim = acceptance-criterion ID + cited evidence IDs; returns accepted claims and a short list of uncited, stale, failed or mismatched ones (§6.6). Does not accept the task by itself; the evaluator does.
+- `get_state_card(session_id)` — compact current state for re-anchoring and handoff (§6.6).
+- `get_evidence(session_id, evidence_ids?)` — return structured summaries and artifact references.
+- `generate_handoff(session_id)` — produce the compact, schema-versioned context packet.
+- `record_agent_event(session_id, event)` — only if an adapter needs a controlled event-ingestion tool; validate payload and size.
+
+There is deliberately no approve/waive tool: approvals come only from the developer (§6.1).
+
+Do not expose `run_shell(command)`, arbitrary filesystem write, unrestricted browser execution, or a tool that lets the model edit approved policy. The MCP server should call the same Python core as the CLI and hooks.
+
+The MCP server should use local stdio transport for the first demo. If remote HTTP transport is introduced later, add authentication, authorization, origin validation, request limits and explicit network exposure controls.
+
+## 13. Agent adapter and hook design
+
+### 13.1 Adapter contract
+
+Each adapter declares capabilities such as:
+
+- Can observe session start/end.
+- Can observe tool execution before/after.
+- Can observe subagent start/stop and identify subagents.
+- Can provide command outputs/transcript references.
+- Can request continuation or block a completion event.
+- Can enforce command/file policies.
+
+Capabilities are reported as facts, not inferred from MCP availability.
+
+### 13.2 Host adapters (agent-neutral) — architecture reference; not an MVP support promise
+
+ProofMesh's core supports an agent-neutral adapter contract. The hackathon build validates **one actual host only**, selected during the first 25–30 minute integration spike. MCP access is portable but advisory by itself. A native hook's enforcement capabilities must be verified against the installed host version and documented payload/response semantics.
+
+Adapter responsibilities:
+
+1. Parse the host-native event and validate it.
+2. Map it to a host-neutral HookEvent.
+3. Call the shared ProofMesh core.
+4. Translate the typed HookDecision back to a supported host response.
+5. Report actual enforcement health/capability. Never claim a block or continuation where the host does not support it.
+
+No task policy, loop logic, or acceptance logic may live only in an adapter.
+
+The following matrix is future integration research, not a requirement to build or certify these hosts in the hackathon. Do not use this table as evidence that the current code supports them.
+
+| Host target | Intended future integration | MVP status |
+|---|---|---|
+| Antigravity | MCP + native lifecycle hook | Preferred first spike; supported only after payload and response are verified |
+| Codex | MCP + command hooks | Future adapter |
+| Claude Code | MCP + command hooks | Future adapter |
+| Devin CLI/Desktop | MCP + supported hooks/plugin | Future adapter |
+| Devin cloud | MCP/plugin + CI verdict | Future; CI is outside MVP |
+| OpenCode | MCP + plugin adapter where needed | Future adapter |
+| Other MCP-capable tools | MCP advisory access | Works only if configured; does not imply enforcement |
+
+Event mappings and hook behavior documented elsewhere in this TRD are reference designs for future adapters. For the demo, implement only the chosen host's event(s) that are verified in the installed version. If the initial host cannot be verified quickly, choose another locally available host rather than writing several speculative adapters.
+
+A session may be reported as ENFORCED only for specific controls confirmed active. MCP-only or incomplete integration must be PARTIAL or UNGUARDED according to actual capabilities.
+
+### 13.3 Antigravity adapter
+
+Antigravity's hooks work the same in the App, CLI and IDE: `hooks.json` maps hook names to events; each handler is a shell command that gets camelCase JSON on stdin and returns JSON on stdout (default timeout 30 s). Every payload carries `conversationId`, `workspacePaths`, `transcriptPath`, `artifactDirectoryPath` and `modelName`. Source: https://antigravity.google/docs/hooks (validate against the installed version).
+
+| Antigravity event | ProofMesh action | Output |
+|---|---|---|
+| `SessionStart` | register session (keyed by `conversationId`), baseline snapshot + baseline gates, load the approved contract | `injectSteps: [{systemMessage: <compact contract>}]` |
+| `PreInvocation` | build a **short** reminder: objective, current blockers, next required evidence (≤ ~600 chars) | `injectSteps: [{ephemeralMessage: …}]` |
+| `PreToolUse` on `write_to_file`, `replace_file_content`, `multi_replace_file_content` | check `TargetFile` against scope, protected paths and protected tests | `allow`, `deny` + reason, or `ask`/`force_ask` per profile (§6.1) |
+| `PreToolUse` on `run_command` | flag commands that obviously edit protected files or skip checks (e.g. `git checkout -- tests/`, `rm` on tests); cannot parse arbitrary shell reliably | `allow` or `ask` with reason; never claims full coverage |
+| `PostToolUse` | record event; on write tools or `run_command`, recompute changed paths from the snapshot and mark evidence stale | `{}` |
+| `Stop` (`fullyIdle: true`) | evaluate completion | `{"decision":"continue","reason":<focused missing-evidence message>}` while budget remains; otherwise allow stop, task stays non-accepted, handoff written |
+
+Notes:
+
+- **Weaker models** drift on large changes and ignore long rule files (AGENTS.md). ProofMesh keeps injected text short and specific, blocks rule-breaking writes at the moment they happen, and turns the stop event into "not done: X is missing", with exact gate and file names.
+- **No host loop flag** on `Stop` (unlike Codex `stop_hook_active`). Loop safety relies on ProofMesh's own continuation budget per contract revision and snapshot, plus no-progress detection.
+- **Never use `overwrite`** (argument rewriting). ProofMesh allows, denies or asks; it does not silently change what the agent does.
+- **Hook config may be workspace-level or user-level depending on the selected host.** For the MVP, use documented manual configuration for the one verified host; do not assume ProofMesh has been installed as a global plugin. Where relevant, treat `.agents/hooks.json`, `.agents/mcp_config.json` and the trusted policy as protected configuration. A changed active integration config drops enforcement health to `UNGUARDED` and appears in the report.
 - Shell commands (`run_command`) can still change files without a write tool. The snapshot diff after each tool call catches these after the fact; this is detection, not prevention, and the report says so.
 - MCP: same stdio server, registered in `~/.gemini/config/mcp_config.json` (global) or `.agents/mcp_config.json` (workspace) with `command`/`args`.
 
@@ -1071,9 +1505,9 @@ The advisor, Playwright smoke check, GitHub PR gate, broad host support, multi-a
 - Laya (open-source decision engine, `systemone` protocol): https://github.com/NandhaKishorM/laya
 - Devin CLI hooks / plugins: https://docs.devin.ai/cli/extensibility/hooks/overview.md, https://docs.devin.ai/cli/extensibility/plugins/overview.md
 
-## 22. Review readiness (jury + AI code reviewer)
+## 22. Review readiness
 
-The submission will be evaluated by human judges and an AI agent that reviews the code. Both reward the same things: a clear story, code that matches its claims, and evidence that it works.
+Keep the project straightforward to inspect, regardless of the event's judging format. A reviewer should be able to follow the product story, verify that code matches its claims, and reproduce the core evidence. This section is a quality checklist, not an assertion about a particular judging tool.
 
 - **One-command, offline demo:** `uv run proofmesh demo` runs the seeded core scenario end-to-end and writes `report.md` + `report.json`. No API keys or network are needed for the core path. A published `uvx` install is valuable but not allowed to delay the working demo.
 - **README first screen:** problem → what ProofMesh does (Intent / Intervention / Evidence) → 30-second demo command → architecture diagram → honest limitations (enforcement levels, same-user DB access, heuristic loop detection).
@@ -1108,28 +1542,28 @@ Decisions taken earlier during ideation (retained for context; superseded items 
 - **D-5** Pydantic v2 strict models validate every trust boundary; invalid input fails closed (§5.6).
 - **D-6** Scope is the hackathon demo; no team/cloud/multi-machine features.
 - **D-7** ProofMesh owns the TaskFile lifecycle and acts as project manager for task intent: agents only propose; ProofMesh rejects, auto-accepts under trusted policy, or escalates to the user (§6). It still does not write code, plan implementations or schedule agents.
-- **D-8** The deliverable is judged by a jury *and* an AI code reviewer; review readiness is a P0 requirement (§22).
+- **D-8** Reviewability is a project quality goal. Any assumption that the event requires an AI code reviewer is unconfirmed and is not an implementation requirement; see §22.
 - **D-9** TaskFile front matter, trusted policy and user config are TOML (stdlib `tomllib`); PyYAML dropped. Runtime deps: `pydantic`, `mcp`.
 - **D-10** Human in the loop: ProofMesh decides routine matters and asks the developer for critical ones; the operating profile sets the line (§6.1).
 - **D-11** Agent-neutral integration: MCP everywhere + thin hook mappings for Codex, Claude Code, Google Antigravity and OpenCode (§13.2).
 - **D-12** Refactors and bugfixes are first-class task kinds with baseline-relative evidence; first real user is a social media app refactor (§6.2).
 - **D-13** Keep it simple but high-impact for the demo.
 - **D-14** *(superseded by D-22)* Primary demo host is Google Antigravity (used with smaller models); other hosts stay supported via the same protocol (§13.3).
-- **D-15** The demo uses the developer's real social media app during its refactor. Pitch: AGENTS.md is advice agents ignore; ProofMesh turns the same rules into checks and hooks.
-- **D-17** Demo surfaces: Antigravity for VS Code (plugins load, developer-confirmed) plus a Devin PR gated by the CI verdict.
-- **D-18** `proofmesh init` makes ProofMesh work on any project: file-based detection → proposed policy → human approval (§6.4).
-- **D-19** Architecture rules are trusted-policy checks, added gradually; built-in `ast` checker for Python, configured tools for other languages (§6.5).
+- **D-15** *(superseded for the MVP by D-30/D-36)* An early demo proposal used the developer's real social-media app during a refactor. The current primary demo uses a prepared deterministic fixture; a live project may be an optional extension.
+- **D-17** *(superseded for the MVP by D-30/D-31)* An early proposal paired an Antigravity workflow with a Devin PR/CI gate. The MVP validates one available host and defers CI/PR gating; the selected host is recorded after the integration spike.
+- **D-18** *(future / not MVP)* `proofmesh init` may later detect a project's stack and propose policy for approval; project auto-initialization is outside the current MVP.
+- **D-19** *(future / not MVP)* Architecture rules may become trusted-policy checks, using existing language-specific tools; comprehensive architecture analysis is deferred.
 - **D-20** *(superseded by D-22)* Distribution: one Antigravity plugin (hooks + MCP + Agent Skill + rule) with pinned versions; the skill is portable to other hosts (§13.5).
 - **D-21** *(superseded by D-22)* Install like comparable tools (graphify, Neon): `uvx proofmesh install antigravity` writes a global Antigravity plugin, idempotent, with exact uninstall; `uvx proofmesh init` does project setup and offers host install; `agy plugin install <repo-subfolder>` and `npx skills add` as alternatives (§13.5).
-- **D-22** *(supersedes D-14, D-20, D-21)* Agent-neutral product. One package in the `plugin/` subfolder, Claude-plugin–compatible layout + Antigravity manifest + Agent Skill + MCP, installed by pasting the repo link; `proofmesh install <host>` is only a fallback (§13.5).
-- **D-23** Devin is a first-class host: Devin CLI/Desktop via the Claude-style adapter, cloud Devin via plugin (skill + MCP) and the CI gate (§13.7).
-- **D-24** Three layers (guide, steer, gate); the CI verdict is the one guarantee that doesn't depend on host hooks (§13.7).
+- **D-22** *(long-term distribution direction only; not MVP)* Keep the core agent-neutral. A future version may package host manifests, Agent Skill guidance, MCP and hooks together; universal/plugin installation remains deferred under §0 and §13.5.
+- **D-23** Devin is a first-class long-term host target, alongside other supported agents. The MVP still validates only one host selected by the integration spike; cloud plugin distribution and CI gating remain future work (§13.2–§13.7).
+- **D-24** Three integration strengths—guide, steer, and gate—remain the product model. For the MVP, guide plus one verified host integration is the target; independent CI gating is future work (§13.7).
 - **D-25** Earlier roadmap differentiators: evidence-cited completion, stepwise refactors/change budgets, context re-anchoring, focused failure feedback, and a CI verdict/receipt. Under D-30–D-38, evidence-cited completion and focused handoff stay in the demo; stepwise refactors and PR/CI receipts are deferred.
 - **D-26** *(superseded by D-38)* The earlier note said build awaited approval; the current request authorizes a scope-locked implementation.
 - **D-27** ProofMesh has no daemon and no model: hosts spawn short-lived hook processes and the stdio MCP server; SQLite holds state; reasoning comes from the host agent (§3.2).
 - **D-28** Optional advisor (P1, off by default) using the `systemone` decision protocol (Laya self-hosted or hosted Jev); escalate-only, fail-safe, recorded as advisory evidence, never on the hot path (§13.8).
 - **D-29** Constraints: zero budget; developer hardware 8 GB RAM, i3 11th gen, no GPU. No required paid service or GPU anywhere in the MVP.
-- **D-16** ProofMesh enforces test obligations: tests with every change, new tests must run and fail on baseline, no test weakening (§6.3).
+- **D-16** *(future / not an MVP requirement under §0)* ProofMesh may later enforce test obligations such as new-test execution, baseline failure, and test-weakening detection. Advanced test-obligation enforcement is deferred.
 
 Open questions (ordered for implementation):
 

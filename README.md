@@ -1,65 +1,36 @@
 # ProofMesh
 
-**An intent-to-evidence control layer for AI-assisted software development.**
+**An agent-neutral intent, intervention, and evidence layer for AI-assisted software development.**
 
-ProofMesh is an agent-neutral assistant tool that helps keep coding agents aligned with an approved task, detects scope drift and unproductive failure loops, and requires current verification evidence before a task is accepted. It works alongside existing agent harnesses; it is not another coding agent or orchestrator.
+ProofMesh is designed to keep coding agents aligned with an approved task, detect scope drift and repeated failures, and require current verification evidence before a task can be accepted. It works alongside existing coding-agent tools; it is not another agent harness or orchestrator.
 
-## Project overview
+## Project status
 
-- **Project name:** ProofMesh
-- **Short description:** Preserve developer intent across AI-assisted implementation, intervene when agents drift or repeat failures, and evaluate completion using fresh, attributable evidence.
-- **Team:** Solo project; see [SUBMISSION.md](SUBMISSION.md).
-- **Working demo:** Not available yet. The runtime implementation has not started; see [docs/BUILD_PLAN.md](docs/BUILD_PLAN.md).
-- **Technology stack:** Planned — Python 3.14, Pydantic v2, SQLite, MCP Python SDK, and uv. These are design choices, not yet verified implementation dependencies.
+**Planning/specification only on this branch. Runtime implementation has not started.** The commands and architecture described in the specifications are design targets, not working features. There is no runnable app or demo yet.
 
-## Current status
+## Documentation
 
-**Documentation and scope planning only. No working application code is available yet.**
+- [Product Requirements Document](docs/PRD.md) — product goals, MVP scope, acceptance criteria, and roadmap.
+- [Technical Requirements Document](docs/TRD.md) — architecture, data model, security, verification, and technical acceptance criteria.
+- [Build plan](docs/BUILD_PLAN.md) — implementation checkpoints, time boxes, demo sequence, and cut lines.
+- [Hackathon tracks reference](docs/BUILD_TRACKS.pdf) — supporting event context; current organizer instructions remain authoritative.
+- [Agent instructions](AGENTS.md) — development practices, security boundaries, and document ownership.
+- [AI assistance record](AI_USAGE.md) — documented AI contributions, separate from Git authorship.
+- [Change log](CHANGELOG.md) — significant project changes and validation.
+- [Submission status](SUBMISSION.md) — project details and outstanding demo/submission checklist.
 
-The repository currently contains the product and technical specifications, the hackathon build plan, and the event-track reference PDF. Do not assume the architecture or CLI commands described in those documents are implemented until a working implementation is committed.
+## Planned implementation
 
-### Key documents
-
-- [Product Requirements Document](docs/PRD.md) — product goals, user needs, demo scope, non-goals, acceptance criteria, and roadmap.
-- [Technical Requirements Document](docs/TRD.md) — architecture, domain model, storage, adapters, security, and technical acceptance criteria.
-- [Hackathon tracks reference](docs/BUILD_TRACKS.pdf) — the supplied event-track PDF.
-- [Overnight Build Plan](docs/BUILD_PLAN.md) — implementation checkpoints, scope cut lines, demo script, and end-of-night checklist.
-- [Repository working rules](RULES.md) and [AI-agent guidance](AGENTS.md).
-- [AI usage record](AI_USAGE.md), [change log](CHANGELOG.md), and [submission checklist](SUBMISSION.md).
-
-## Run the project
-
-The project is **not runnable yet** because the implementation is not present. Do not run speculative install/start/test commands or treat planned commands as working.
-
-Once a first vertical slice exists, update this section in the same commit as the corresponding implementation so it contains actual prerequisites, dependency installation, environment setup, start, and test/demo commands.
+The current design targets Python 3.14, Pydantic v2, SQLite, the MCP Python SDK, and `uv`. These are planned choices, not verified installed dependencies. The implementation should stay local-first, use minimal dependencies, and avoid a required hosted model, paid service, Docker runtime, or network dependency for the core demo.
 
 ## Intended demo
 
-The first demo should prove one repeatable control loop:
+**Approved task → repository scope finding → real configured check → code-bound evidence → blocked verdict and focused handoff → correction → fresh evidence → accepted verdict.**
 
-**Approved task intent → scope/change finding → real configured check → code-bound evidence → blocked verdict/intervention → correction → fresh evidence → accepted verdict.**
+The core demo should be deterministic and repeatable without requiring a live model to make a particular mistake. Seeded or replayed events must be labelled. A real agent/hook integration is only described as working after its actual request/response behavior has been verified.
 
-The primary demo must not depend on a live model making a specific mistake. Seeded/replayed events must be clearly labelled. One real agent integration is targeted; enforcement guarantees must be described only when the host's actual behavior has been verified.
+## Scope and limitations
 
-## Current limitations
+The [PRD priority table](docs/PRD.md#9-functional-requirements) and [TRD scope lock](docs/TRD.md#0-scope-lock-for-the-hackathon-build) define the MVP boundary. Broader host support, CI/PR gating, multi-agent orchestration, stepwise refactoring, and decision-model integration are not assumed to be MVP features unless those specifications explicitly promote them.
 
-- No runtime implementation or runnable demo yet.
-- Agent/hook integration compatibility is not yet validated by code.
-- Planned stack and architecture remain subject to the implementation and tests.
-- The project does not claim to prove program correctness or forcibly control every uninstrumented agent.
-
-## Libraries, APIs, and references
-
-Planned references, not a claim of integrated usage:
-
-- [Model Context Protocol](https://modelcontextprotocol.io/)
-- [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk)
-- [Pydantic](https://docs.pydantic.dev/)
-- [uv](https://docs.astral.sh/uv/)
-- [Playwright](https://playwright.dev/) — optional future verification provider.
-
-## Event-template note
-
-The starter documentation in the [DevDay Kochi template repository](https://github.com/anima-regem/devday-kochi-hackathon-template) originally described **DevDay Exchange Community Hackathon, 10–11 October 2026**. Its [corrected Devin Hack Kochi branch](https://github.com/anima-regem/devday-kochi-hackathon-template/tree/codex/correct-devin-hack-kochi-cainebenoy) says the older event details were inherited from a previous template and that Codex is not required for Devin Hack Kochi.
-
-That correction is in a participant-maintained project branch, not an official organizer rules page. We therefore do not carry forward the old template's dates, venue, registration, team-size limits, credit promises, or Codex/OpenAI-specific assumptions. Follow current organizer instructions for eligibility, logistics, and submission. See [RULES.md](RULES.md) for the distinction.
+ProofMesh does not prove universal program correctness or forcibly control every uninstrumented agent. MCP access alone is advisory; the actual enforcement level depends on the verified host integration and any independent gate that is configured.

@@ -1,9 +1,10 @@
 # ProofMesh — Hackathon Build Plan
 
 **Status:** Active build checklist  
-**Branch:** hackathon/template-compliance  
-**Updated at:** 2026-10-24T22:15:13+05:30. **Remaining time:** approximately 12 hours 45 minutes until the 11:00 IST deadline on October 25. The checkpoint schedule begins at the earlier 21:50 planning time; resume immediately at the current checkpoint and preserve the final freeze/submission buffer.  
-**Authority:** [PRD](PRD.md) defines product behavior; [TRD](TRD.md) defines technical boundaries; this plan defines build order and cut lines. The [hackathon tracks reference](BUILD_TRACKS.pdf) is supporting event context, not the product specification. Follow [AGENTS.md](../AGENTS.md) and [RULES.md](../RULES.md) for project workflow. The linked repository's corrected Devin Hack Kochi branch says its older starter files carried the wrong event details and that Codex is not required. This is participant-maintained guidance, not an official organizer rules page; follow current organizer communications and do not inherit the older template's dates, venue, team limits, credits, or Codex assumptions.
+**Working branch:** hackathon/template-compliance  
+**Updated at:** 2026-10-24T22:31:24+05:30  
+**Deadline noted for planning:** October 25, 2026, 11:00 IST; confirm against current organizer communications. A live remaining-time countdown is intentionally omitted because it quickly becomes stale.  
+**Authority:** [PRD](PRD.md) defines product behavior and priorities; [TRD](TRD.md) §0 and §20 define the technical MVP boundary; this plan defines implementation order and cut lines. Follow [AGENTS.md](../AGENTS.md) for workflow and safety practices. Roadmap and historical ideation notes must not expand the MVP beyond the explicit scope lock.
 
 ## 1. The only outcome that matters tonight
 
