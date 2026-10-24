@@ -497,6 +497,8 @@ Skills, rules and AGENTS.md tell an agent what to do. Hook scripts on the market
 4. **Focused failure feedback and loop fingerprints.** Instead of passing raw logs back, ProofMesh returns a digest: first failing test, file:line, rule ID, and what changed since the last attempt. Normalized failure fingerprints detect "same failure again" and "edits with no progress"; after the budget, automatic retries stop and the developer gets the handoff.
 5. **A verdict that travels with the change.** `proofmesh verify --ci` re-runs the trusted gates on the PR head, checks the contract and evidence, and posts the verdict as a status check plus a short PR comment, with a machine-readable receipt (contract digest, snapshot hash, gate results, criterion→evidence map). Human reviewers, the jury and AI reviewers (e.g. Devin Review) read the receipt instead of trusting the agent's summary. It works even for agents with no hooks at all.
 
+All five are approved for the MVP (D-25); if time is short, #2 is cut first.
+
 Out of scope for the MVP: LLM judging of acceptance, agent orchestration, writing code.
 
 ## 7. Repository snapshot and scope analysis
@@ -1006,7 +1008,8 @@ Decisions taken during ideation (branch `devin/ideation`):
 - **D-22** *(supersedes D-14, D-20, D-21)* Agent-neutral product. One package in the `plugin/` subfolder, Claude-plugin–compatible layout + Antigravity manifest + Agent Skill + MCP, installed by pasting the repo link; `proofmesh install <host>` is only a fallback (§13.5).
 - **D-23** Devin is a first-class host: Devin CLI/Desktop via the Claude-style adapter, cloud Devin via plugin (skill + MCP) and the CI gate (§13.7).
 - **D-24** Three layers (guide, steer, gate); the CI verdict is the one guarantee that doesn't depend on host hooks (§13.7).
-- **D-25** Differentiators to build: evidence-cited completion, stepwise refactors with change budget, context re-anchoring, focused failure feedback, a verdict + receipt on the PR (§6.6).
+- **D-25** Differentiators approved by the developer: evidence-cited completion, stepwise refactors with change budget, context re-anchoring, focused failure feedback, a verdict + receipt on the PR (§6.6). If time is short, stepwise refactors are cut first.
+- **D-26** Build has not started; it begins only after the developer approves it, following further discussion.
 - **D-16** ProofMesh enforces test obligations: tests with every change, new tests must run and fail on baseline, no test weakening (§6.3).
 
 Open questions:

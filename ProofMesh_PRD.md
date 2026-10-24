@@ -218,7 +218,7 @@ Priority definitions: **P0** = necessary for the hackathon end-to-end demo; **P1
 | FR-26 | P0 | One-step install | One package in the repo's `plugin/` subfolder (hooks, MCP server, Agent Skill, short rule, pinned versions) installs by pasting the repo link into supported agents; `proofmesh install <host>` as fallback with exact `uninstall`; `proofmesh doctor` reports what each host loaded. |
 | FR-27 | P0 | Evidence-cited completion | `claim_complete` requires each acceptance criterion to cite evidence IDs; uncited, stale, failed or mismatched citations are listed and block acceptance. |
 | FR-28 | P0 | CI verdict on the PR | `proofmesh verify --ci` re-runs trusted gates on the PR head and posts status + receipt; works for agents without hooks (e.g. cloud Devin). |
-| FR-29 | P1 | Stepwise refactor + change budget | Ordered refactor steps; only the current step is writable; next step unlocks after verification; over-budget changes ask the developer. |
+| FR-29 | P1 (first cut if time is short) | Stepwise refactor + change budget | Ordered refactor steps; only the current step is writable; next step unlocks after verification; over-budget changes ask the developer. |
 | FR-30 | P0 | Context re-anchoring | Compact state card injected at session start, after compaction and on handoff between agents. |
 | FR-19 | P0 | Review-ready submission | One-command offline demo produces Markdown + JSON reports; README claims map to code and tests; CI is green. |
 
