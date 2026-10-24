@@ -17,23 +17,25 @@ Build a small, agent-neutral core that can:
 6. produce deterministic completion verdicts;
 7. expose the same core through a CLI, MCP tools, and one native hook adapter;
 8. validate every piece of data that crosses a trust boundary at runtime (Pydantic, strict mode) and fail closed;
-9. ship as a single lightweight, portable container image with persistent state stored outside the agent-writable workspace.
+9. ship as a lean native Python package (stdlib SQLite, minimal third-party dependencies, no services or containers required) with persistent state stored outside the agent-writable workspace.
 
 The core must not implement its own model loop, choose which agent writes code, orchestrate agents, or require a web UI to function.
 
 ## 2. Recommended implementation stack
 
-- **Language:** Python 3.14 (pinned via `requires-python = ">=3.14,<3.15"`). All planned core dependencies (Pydantic, pydantic-core, pydantic-settings, MCP SDK, SQLAlchemy, Alembic, psycopg, PyYAML, Typer) publish Python 3.14 classifiers on PyPI; re-verify wheels for both `linux/amd64` and `linux/arm64` when locking.
-- **Models/validation:** Pydantic v2 in strict mode for all domain models and every trust boundary (see §5.6). `pydantic-settings` for configuration.
-- **TaskFile format:** structured Markdown with a small YAML front-matter block (see §6). YAML parsed with `yaml.safe_load` only; Markdown body parsed by a strict, line-based section parser (no general-purpose Markdown renderer required).
-- **Persistence:** storage abstraction with SQLite as the default backend (WAL mode, file kept in a protected data directory outside the workspace) and PostgreSQL (e.g. Neon) as an opt-in backend selected by a database URL (see §14).
-- **DB access layer (proposed):** SQLAlchemy 2.x **Core** (no ORM) + Alembic migrations so one schema definition serves both SQLite and Postgres; `psycopg` (v3) as the Postgres driver. Alternative: hand-written SQL over `sqlite3`/`psycopg` with fewer dependencies but duplicated dialect logic — open decision (§22).
+Guiding rule: **minimal dependencies**. Every third-party package must earn its place; prefer the standard library.
+
+- **Language:** Python 3.14 (pinned via `requires-python = ">=3.14,<3.15"`). Planned third-party dependencies (Pydantic, MCP SDK, PyYAML) publish Python 3.14 classifiers on PyPI.
+- **Runtime dependencies (target):** `pydantic` (v2), `mcp` (official SDK), `pyyaml` (TaskFile front matter — or zero if TOML front matter is chosen, §23). Everything else from the standard library.
+- **Models/validation:** Pydantic v2 in strict mode for all domain models and every trust boundary (see §5.6). Configuration is a strict Pydantic model loaded from a user-level TOML file (`tomllib`) and environment variables — no `pydantic-settings` dependency needed.
+- **TaskFile format:** structured Markdown with a small front-matter block (see §6). Front matter parsed with `yaml.safe_load` only; Markdown body parsed by a strict, line-based section parser (no Markdown library).
+- **Persistence:** SQLite only, via the standard-library `sqlite3` module with hand-written, parameterized SQL. No ORM, no query builder, no migration framework. Database file lives in a protected per-user data directory outside the workspace (see §14).
 - **MCP:** official MCP Python SDK; pin the SDK version in the lock file and use stable, commonly supported tool primitives.
-- **CLI:** Typer or argparse; choose one and avoid excess CLI framework work.
+- **CLI:** `argparse` (standard library).
 - **Repository observation:** Git CLI plus filesystem fingerprints for untracked files.
 - **Checks:** subprocess runner invoking allowlisted commands such as `pytest`, `ruff`, type checks, or a project-specific test script.
-- **Packaging/runtime:** one OCI image built with a multi-stage Dockerfile on `python:3.14-slim`, dependencies installed with `uv` from a frozen lock file, run as non-root with a read-only root filesystem (see §3.1).
-- **Static typing/lint:** pyright or mypy in strict mode (with the Pydantic plugin for mypy) and ruff, enforced in CI.
+- **Packaging/runtime:** a normal Python package managed with `uv` (`uv.lock` committed); installed with `uv tool install proofmesh` or run with `uvx proofmesh`. No Docker in the runtime path (decision and rationale in §3.1).
+- **Dev tooling (not shipped):** pytest, ruff, pyright (strict) — enforced in CI.
 - **Optional UI:** minimal local web dashboard only after the core end-to-end flow works. A terminal report is acceptable for MVP.
 - **Optional UI verification:** existing Playwright test/script; do not build a browser automation engine.
 
@@ -76,53 +78,30 @@ Existing coding-agent harness
 - **Storage:** structured event/evidence/task records in SQLite; large check output and screenshots as bounded artifacts on disk.
 - **Check providers:** typed plugins that run a known check and return a structured result. Never accept an arbitrary shell command from model output.
 
-### 3.1 Container runtime
+### 3.1 Runtime and distribution
 
-The whole tool runs inside one container. Goals: small image, same behaviour on Linux/macOS/Windows hosts, no host Python required, and no write access to anything except ProofMesh's own data directory.
+**Decision (D-3, revised): no Docker in the runtime path.** ProofMesh runs as a native Python 3.14 process launched by the agent harness (MCP stdio server, hook command) or the user (CLI).
 
-**Image**
+Rationale:
 
-- Multi-stage build: builder stage copies the `uv` binary, runs `uv sync --frozen --no-dev` into `/app/.venv`; runtime stage is `python:3.14-slim` + `git` (needed for repository observation) + the venv. No compilers, no package caches, no shell tooling beyond what slim ships.
-- Multi-arch (`linux/amd64`, `linux/arm64`) via `docker buildx`.
-- Non-root default user; `ENTRYPOINT ["proofmesh"]`; `PYTHONDONTWRITEBYTECODE=1`, `PYTHONUNBUFFERED=1`.
-- System gitconfig sets `safe.directory=/workspace` so a bind-mounted repo owned by a different UID does not trigger Git's "dubious ownership" error.
-- `alpine` (musl) and distroless bases are candidates only if measured size/compatibility wins justify them; `slim` is the default because all dependencies ship glibc wheels. Measure the final image size and record a target once the first build exists.
+1. **Checks need the project's own toolchain.** ProofMesh's job is to run the target repo's tests/linters. Natively, it uses the toolchain already on the developer's machine. In a container, every project would need a derived image with its toolchain installed — the largest source of complexity in the container design.
+2. **Hook/MCP latency and moving parts.** Measured on the Linux dev VM (warm cache, `python:3.14-slim` = 180 MB uncompressed): bare Python start ≈ 0.01 s, `docker exec` into a running container ≈ 0.05 s, `docker run --rm` ≈ 0.27 s per call. Linux overhead is tolerable, but it adds a daemon dependency, and Docker Desktop on macOS/Windows (not measured) adds a VM layer, file-sharing quirks and SQLite-WAL-over-file-sharing risk.
+3. **Friction for users and reviewers.** Containers add path mapping (host paths in hook payloads → `/workspace`), UID/ownership problems (`git` "dubious ownership"), and require Docker to be installed and running.
+4. **Dependencies are now tiny.** With stdlib `sqlite3` and `argparse`, a native install is three direct dependencies (the MCP SDK brings its own transitive ones); a container no longer buys much portability.
+5. **The real container benefit — sandboxing untrusted test code — is out of MVP scope** (the demo runs only a prepared, trusted repository).
 
-**Mounts and filesystem**
+What is kept from the container design: state stored outside the repo, ProofMesh never writes to the workspace, least-privilege subprocess execution (§8.1).
 
-| Container path | Source | Mode | Purpose |
-|---|---|---|---|
-| `/workspace` | the target repository (bind mount) | read-only by default | observed code; ProofMesh never writes here |
-| `/data` | named volume `proofmesh-data` (default) or a host dir | read-write, `0700` | SQLite DB, artifacts, backups, pinned policy |
-| `/tmp` | tmpfs | read-write | scratch for check runs (caches, temp files) |
-| `/run/secrets/*` | Docker secrets / read-only file mounts | read-only | e.g. Postgres URL file |
-
-Mounting the workspace read-only is a deliberate least-privilege choice: generated session data no longer lives in `<repo>/.proofmesh/`, so an agent cannot edit or delete ProofMesh's records by editing the repo. Checks that need to write (pytest cache, coverage files) are pointed at `/tmp` (`-p no:cacheprovider`, `COVERAGE_FILE=/tmp/...`) or get a per-run copy/overlay — open question (§22).
-
-**Run flags (baseline)**
+**Install and run**
 
 ```text
-docker run --rm -i --init \
-  --read-only --tmpfs /tmp \
-  --cap-drop ALL --security-opt no-new-privileges \
-  --user "$(id -u):$(id -g)" \
-  --network none \
-  -v "$PWD":/workspace:ro \
-  -v proofmesh-data:/data \
-  ghcr.io/<owner>/proofmesh:<version> <command>
+uv tool install proofmesh          # or: uvx proofmesh <command>
+proofmesh init                     # registers the repo, creates the data dir + DB
+proofmesh mcp                      # MCP stdio server (configured in the agent harness)
+proofmesh hook stop < payload.json # lifecycle hook entry point
 ```
 
-`--network none` applies to local SQLite mode; omit it when a remote Postgres/Neon backend is configured. A `compose.yaml` provides the same settings for a long-lived instance.
-
-**Integration modes**
-
-- **MCP (stdio):** agent config launches `docker run -i --rm ... proofmesh mcp`; stdio works through `-i` without exposing a port.
-- **Lifecycle hooks:** hooks are invoked per event and are latency-sensitive. Options: (a) `docker run --rm -i ... proofmesh hook <event>` per call (simplest, pays container start-up each time); (b) a long-lived container from `compose.yaml` plus `docker exec -i proofmesh proofmesh hook <event>` (faster). Measure both before choosing (§22).
-- **Host path mapping:** hook payloads and agent events contain host absolute paths; the adapter maps the configured host repo root to `/workspace` and rejects paths outside it.
-
-**Check execution inside the container**
-
-The ProofMesh image only contains Python 3.14 + ProofMesh. Checks need the *target project's* toolchain. MVP: the demo uses a derived image (`proofmesh-demo`) that adds the sample app's dependencies in a separate venv. Not planned for MVP: mounting the Docker socket to launch sibling check containers (equivalent to host root access). Rootless/sandboxed per-gate runners are future work (§22).
+**Revisit Docker later** only as an *optional sandbox for check execution* (running gates for untrusted repositories in a throwaway container), not as the way ProofMesh itself runs.
 
 ## 4. Proposed repository layout
 
@@ -130,16 +109,13 @@ The ProofMesh image only contains Python 3.14 + ProofMesh. Checks need the *targ
 proofmesh/
   pyproject.toml
   uv.lock
-  Dockerfile
-  compose.yaml
-  .dockerignore
   README.md
   config/
     default-policy.yaml
   src/proofmesh/
     __init__.py
     cli.py
-    config.py                 # pydantic-settings; DB URL as SecretStr
+    config.py                 # strict Pydantic config from TOML + env
     models/
       base.py                 # strict base models + shared constrained types
       task.py
@@ -164,17 +140,15 @@ proofmesh/
       pytest_check.py
       playwright_check.py   # optional / P1
     storage/
-      ports.py                # storage interface used by core
-      schema.py               # SQLAlchemy Core tables (shared by both backends)
-      sqlite_backend.py       # PRAGMAs, integrity check, backup
-      postgres_backend.py     # Neon / any Postgres (opt-in)
-      migrations/             # Alembic
+      db.py                   # sqlite3 connection, PRAGMAs, integrity check, backup
+      store.py                # hand-written parameterized queries -> Pydantic models
       hashchain.py            # tamper-evident append-only records
+      migrations/             # 001_init.sql, 002_*.sql (applied via PRAGMA user_version)
   tests/
     test_task_contract.py
     test_taskfile_md.py
     test_model_validation.py
-    test_storage_backends.py
+    test_storage.py
     test_scope_analyzer.py
     test_evidence_freshness.py
     test_loop_detector.py
@@ -183,10 +157,10 @@ proofmesh/
     sample-app/
     TASK.md                   # Markdown TaskFile
     policy.yaml
-    Dockerfile                # proofmesh-demo image with sample-app deps
+    run_demo.py               # one-command, offline, seeded demo
 ```
 
-Keep the structure flexible; if time is tight, combine files rather than spending time scaffolding unused modules. Session data is no longer written into the target repo; it lives under `/data` in the container (§3.1, §14).
+Keep the structure flexible; if time is tight, combine files rather than spending time scaffolding unused modules. Session data is never written into the target repo; it lives in the ProofMesh data directory (§14). `demo/TASK.md` is only the *input* used to seed the demo; the canonical TaskFile lives in ProofMesh's store (§6).
 
 ## 5. Core data model
 
@@ -290,10 +264,10 @@ Mutable aggregates (e.g. `Session`) use `validate_assignment=True`; state change
 
 - IDs: `Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9-]{0,63}$")]` (task, gate, criterion IDs use their own patterns, e.g. `^AC-\d{1,4}$`).
 - Digests: `^sha256:[0-9a-f]{64}$`.
-- `RepoRelPath`: POSIX, relative, normalized, no `..`, no NUL, no drive letters; resolved against `/workspace` with symlink-escape checks.
+- `RepoRelPath`: POSIX, relative, normalized, no `..`, no NUL, no drive letters; resolved against the registered repository root with symlink-escape checks.
 - Timestamps: `AwareDatetime`, normalized to UTC.
 - Enums: `StrEnum` for statuses, verdicts, risk levels, enforcement levels.
-- Secrets: `SecretStr` (DB URL, tokens); never included in `repr`, logs, reports or error messages.
+- Secrets: `SecretStr` for any credential that may be configured later (none required in MVP); never included in `repr`, logs, reports or error messages.
 - Collections: bounded (`max_length`) lists/dicts; event payloads use discriminated unions on `event_type` with a `schema_version` field.
 
 **Parsing rules**
@@ -306,14 +280,24 @@ Mutable aggregates (e.g. `Session`) use `validate_assignment=True`; state change
 
 ## 6. TaskFile format and lifecycle
 
-The TaskFile is a **structured Markdown file** (default name `TASK.md`, or `.proofmesh/tasks/<task-id>.md` in a user-controlled location). Markdown keeps it readable for humans and natural for LLMs to read and draft; a small YAML front-matter block plus a fixed set of headings keeps it deterministic to parse.
+The TaskFile is a **structured Markdown document**. Markdown keeps it readable for humans and natural for LLMs to read and draft; a small YAML front-matter block plus a fixed set of headings keeps it deterministic to parse.
+
+**Ownership: ProofMesh owns TaskFiles.** ProofMesh acts as the project manager for task intent. Agents can read the active TaskFile and *propose* a new task or an amendment, but no TaskFile is created, changed or superseded without a ProofMesh decision:
+
+- The canonical TaskFile (raw Markdown + validated model + digest) is stored in ProofMesh's database (§14), not in the repository. There is no repo file whose edits ProofMesh would honour.
+- Agents get the TaskFile through MCP (`get_task_contract`, returning Markdown + digest) or the CLI (`proofmesh task show`). Optionally ProofMesh can export a read-only copy for context; edits to that copy are ignored and reported as a `task-contract-integrity` finding.
+- Agents submit drafts through MCP (`propose_task`, `propose_contract_amendment`). ProofMesh validates the draft (schema, grammar, known gates, policy) and decides:
+  - **reject** — with structured reasons (invalid structure, unknown gates, scope expansion forbidden by policy);
+  - **accept automatically** — only where trusted policy allows it (e.g. an amendment that narrows scope or adds acceptance criteria without changing risk);
+  - **escalate** — `REQUIRE_APPROVAL` to the user for the initial contract and for any consequential change (scope expansion, risk increase, removed acceptance criteria, changed gates).
+- Every decision is recorded as an approval/rejection event with actor (`proofmesh-policy:<rule-id>` or `user:<name>`) and reason.
 
 Design rules:
 
 - **Front matter** holds identity and machine-enforced policy: format version, task ID, revision link, risk level, scope globs, required gates.
 - **Body** holds intent in prose, under a fixed set of `##` headings. Acceptance criteria use a strict list grammar so IDs and gate mappings are machine-readable.
-- Approval metadata and the digest are **not** in the file; they live in the database (§5.1). The on-disk file is a working copy; the approved canonical content is stored in `task_revisions`.
-- One file = one revision proposal. Editing an approved TaskFile on disk does not change the approved revision; ProofMesh detects the mismatch (on-disk digest ≠ approved digest) and reports a `task-contract-integrity` finding, then offers `task propose` to create an amendment.
+- Approval metadata and the digest are **not** in the Markdown; they live in the database (§5.1) next to the canonical content in `task_revisions`.
+- One document = one revision proposal.
 
 Illustrative format (exact grammar to be finalized, semantics stable):
 
@@ -367,11 +351,11 @@ Free-form context for the agent. Included in the digest.
 
 Lifecycle:
 
-1. `propose` — create a draft from a precise prompt or bounded investigation (an LLM may draft the Markdown; ProofMesh validates it).
-2. `review` — show objective, acceptance criteria, proposed scope, assumptions and risk.
-3. `approve` — canonicalize content, calculate digest, store immutable approved revision in the database.
-4. `amend` — create a proposed new revision; never overwrite the approved revision.
-5. `supersede` — user approves the new revision; older revision remains auditable.
+1. `propose` — a user (CLI) or an agent (MCP) submits a draft from a precise prompt or bounded investigation; ProofMesh validates it.
+2. `review` — ProofMesh shows objective, acceptance criteria, proposed scope, assumptions, risk and its own findings.
+3. `decide` — ProofMesh rejects, auto-accepts under trusted policy, or requests user approval (initial contracts always require the user).
+4. `approve` — canonicalize content, calculate digest, store the immutable approved revision.
+5. `amend` / `supersede` — a new proposal goes through the same decision; the approved revision is never overwritten and older revisions remain auditable.
 
 For vague tasks, read-only investigation may happen before approval. The implementation plan and write scope should be approved before implementation begins, except for explicitly authorized low-risk auto-approval policy. Keep user interviews and automatic clarification to consequential ambiguity; do not ask the user about every trivial implementation detail.
 
@@ -496,8 +480,9 @@ Keep two concepts separate: `completion_verdict` and `enforcement_capability`. A
 
 Keep tool descriptions narrow and input schemas validated. Proposed tools:
 
-- `get_task_contract(task_id, revision?)` — read the approved contract and active digest.
-- `propose_contract_amendment(task_id, proposal)` — record a proposal; does not approve it.
+- `get_task_contract(task_id, revision?)` — read the approved contract (Markdown + structured model) and active digest.
+- `propose_task(draft_markdown)` — submit a new TaskFile draft; returns ProofMesh's decision (`REJECTED` with reasons, or `PENDING_APPROVAL`).
+- `propose_contract_amendment(task_id, draft_markdown, reason)` — submit an amendment; returns `REJECTED`, `ACCEPTED_BY_POLICY` or `PENDING_APPROVAL`. Never approves directly on the agent's say-so.
 - `inspect_changes(session_id)` — return changed paths and scope findings.
 - `run_verification(session_id, gate_ids?)` — run configured checks by ID only.
 - `get_completion_status(session_id)` — return state, blockers, evidence freshness, and enforcement capabilities.
@@ -540,58 +525,45 @@ Validate the exact event names, input/output schema and continuation semantics a
 
 MCP-only mode is advisory. A lifecycle hook can request continuation only to the extent the host supports and honors it. Git/CI gates can enforce merge policy independently. A local agent can still claim completion in chat; ProofMesh governs its own acceptance state, not arbitrary text in the host conversation.
 
-## 14. Storage: schema, placement, safety and backends
+## 14. Storage (SQLite only)
+
+**Decision (D-4, revised): SQLite only**, standard-library `sqlite3`, hand-written parameterized SQL. No Postgres/Neon, no ORM, no migration framework.
+
+Why SQLite rather than plain JSON files: both cost zero dependencies, but the MCP server, hook processes and CLI can write at the same moment. JSON files would need hand-rolled locking and atomic-rename logic to avoid lost or corrupted writes, plus hand-written indexing for queries like "latest evidence for gate X at snapshot Y". SQLite provides transactions, WAL concurrency and integrity checks for free. JSON is still used for **exports** (`proofmesh report --format json`), which reviewers and other tools can read directly.
 
 ### 14.1 Logical schema
 
-Tables to implement (shared by all backends):
-
 - `projects(project_id, root_path, created_at)`
 - `tasks(task_id, project_id, created_at)`
-- `task_revisions(task_id, revision, canonical_json, digest, raw_markdown, raw_digest, approval_status, approved_by, approved_at)`
+- `task_revisions(task_id, revision, canonical_json, digest, raw_markdown, raw_digest, approval_status, decided_by, decided_at, decision_reason)`
+- `task_proposals(proposal_id, task_id, base_revision, raw_markdown, submitted_by, submitted_at, decision, decision_reasons_json)`
 - `sessions(session_id, task_id, revision, baseline_snapshot_id, policy_digest, profile, integration_status, state, started_at, ended_at)`
 - `events(event_id, session_id, source, event_type, occurred_at, payload_json, snapshot_before, snapshot_after, prev_hash, row_hash)`
 - `snapshots(snapshot_id, session_id, manifest_digest, manifest_json, captured_at)`
 - `evidence(evidence_id, session_id, task_revision, gate_id, provider, status, snapshot_before, snapshot_after, started_at, ended_at, exit_code, summary_json, artifact_refs_json, prev_hash, row_hash)`
 - `verdicts(verdict_id, session_id, evaluated_at, verdict, reasons_json, snapshot_id, contract_revision, enforcement_level, prev_hash, row_hash)`
 - `approvals(approval_id, session_id, action, target_revision, actor, reason, created_at, prev_hash, row_hash)`
-- `schema_meta(version, applied_at)`
 
-Use versioned migrations (Alembic). Add indexes for `session_id`, timestamps, task/revision, and gate/status lookups. JSON columns are `TEXT` in SQLite and `JSONB` in Postgres; timestamps are UTC (`TEXT` ISO-8601 in SQLite, `timestamptz` in Postgres). Every row is re-validated through its Pydantic model when read. Keep large logs out of the database; store bounded artifacts under `/data/artifacts/` with controlled file names and configured retention.
+JSON columns are `TEXT` holding canonical JSON; timestamps are UTC ISO-8601 `TEXT`. Add indexes for `session_id`, timestamps, task/revision, and gate/status lookups. Every row is re-validated through its Pydantic model when read.
 
-### 14.2 Storage interface
+### 14.2 Query layer and migrations
 
-Core services depend only on a storage port (repository interface: `save_revision`, `append_event`, `append_evidence`, `latest_verdict`, …). Core never imports `sqlite3`, `psycopg` or SQLAlchemy directly. The backend is selected at start-up from configuration:
+- One module (`storage/store.py`) owns all SQL. Queries are hand-written and **always parameterized** (`?` placeholders); no string-formatted SQL. Each function returns validated Pydantic models, never raw rows.
+- Migrations are ordered SQL files (`migrations/001_init.sql`, …). On start-up ProofMesh reads `PRAGMA user_version`, applies missing files inside a transaction, and bumps the version. A DB with a newer version than the code understands is refused (exit `3`).
+- Writes use short explicit transactions (`BEGIN IMMEDIATE`) so concurrent processes serialize cleanly.
 
-| Setting | Example | Notes |
-|---|---|---|
-| `PROOFMESH_DATABASE_URL` | `sqlite:////data/proofmesh.db` (default) | local, offline, zero setup |
-| | `postgresql+psycopg://user@host/db?sslmode=require` | Neon or any Postgres; opt-in |
-| `PROOFMESH_DATABASE_URL_FILE` | `/run/secrets/proofmesh_db_url` | preferred for credentials; overrides the plain env var |
+### 14.3 Keeping the `.db` file safe
 
-The URL is a `SecretStr`, never written to logs, reports, handoffs or the repo. Config is loaded from trusted sources only (env, secret file, user-level config under `/data`), never from the workspace.
-
-### 14.3 SQLite (default) — keeping the `.db` file safe
-
-- **Location:** `/data/proofmesh.db` inside the container, backed by the named volume `proofmesh-data` (default) or a user-chosen host directory (e.g. `${XDG_DATA_HOME:-~/.local/share}/proofmesh`). Never inside the target repository, so the agent cannot edit, delete or commit it.
-- **Permissions:** directory `0700`, files `0600` (process `umask 077`); owned by the container user.
+- **Location:** `${PROOFMESH_HOME:-$XDG_DATA_HOME/proofmesh}` (default `~/.local/share/proofmesh/` on Linux, platform equivalent on macOS/Windows), one DB per registered project: `<data-dir>/projects/<project-id>/proofmesh.db`. Never inside the target repository, so the agent cannot accidentally edit, delete or commit it, and it never appears in diffs.
+- **Permissions:** directory `0700`, files `0600` (process `umask 077`).
 - **Connection PRAGMAs:** `journal_mode=WAL`, `synchronous=FULL` (durability of evidence/verdicts over raw write speed; revisit if slow), `foreign_keys=ON`, `busy_timeout=5000`, `trusted_schema=OFF`.
-- **Start-up checks:** `PRAGMA quick_check` and schema-version check; refuse to run (exit `3`) on corruption or unknown future schema instead of writing to a damaged DB.
-- **Concurrency:** one writer process per DB (MCP server, hooks and CLI serialize writes through short transactions); WAL allows concurrent readers.
-- **Filesystem caveat:** SQLite WAL is not supported on network filesystems. Docker Desktop (macOS/Windows) bind mounts go through a VM file-sharing layer, so the default is a named volume (stored inside the Docker VM's local filesystem). Host-directory mounts are supported but documented as "local disk only".
-- **Backups:** `proofmesh db backup` uses the SQLite online backup API (or `VACUUM INTO`) to write a consistent timestamped copy under `/data/backups/`; never `cp` the live `.db` while `-wal`/`-shm` files exist. `proofmesh db restore` validates integrity and schema version first.
-- **Tamper evidence:** append-only tables (`events`, `evidence`, `verdicts`, `approvals`) carry a hash chain: `row_hash = sha256(prev_hash || canonical_json(row))`. `proofmesh db verify` walks the chain and reports breaks. This *detects* edits by anything that did not rewrite the whole chain; it does not *prevent* a party with full DB write access from rebuilding it. Anchoring the chain head externally (in reports, a Git note, or a remote DB) is future work.
-- **Encryption at rest:** not in MVP; rely on host disk encryption. SQLCipher or application-level encryption of sensitive columns are options (§22).
-
-### 14.4 PostgreSQL / Neon (opt-in)
-
-- Same schema and migrations via SQLAlchemy Core + Alembic; driver `psycopg` 3.
-- TLS required (`sslmode=require` minimum; `verify-full` with CA bundle preferred). Reject non-TLS URLs unless an explicit `allow_insecure_db` flag is set in trusted config (local dev only).
-- Connection timeout and bounded retries; a DB outage makes the evaluator return `UNKNOWN`, never `ALLOW`.
-- Neon specifics to validate: pooled endpoints use PgBouncer in transaction mode (server-side prepared statements must be disabled, e.g. psycopg `prepare_threshold=None`, or use the direct endpoint); scale-to-zero adds cold-start latency on the first query — measure against hook latency budgets.
-- Least-privilege DB role: application role can `INSERT`/`SELECT` on append-only tables but not `UPDATE`/`DELETE` them; migrations run with a separate role.
-- **Privacy trade-off:** with a remote DB, task contracts, event metadata, evidence summaries and verdicts leave the machine. This must be an explicit user choice (PRD principle 6). Large artifacts stay in local `/data/artifacts/` unless artifact sharing is separately designed.
-- **Offline:** the hackathon demo uses SQLite so the core verification path works without network access (PRD §13). Container runs with `--network none` in SQLite mode.
+- **Start-up checks:** `PRAGMA quick_check` and schema-version check; refuse to run (exit `3`) on corruption instead of writing to a damaged DB.
+- **Filesystem caveat:** SQLite WAL is not supported on network filesystems; refuse or warn if the data dir is on one.
+- **Backups:** `proofmesh db backup` uses `sqlite3.Connection.backup()` to write a consistent timestamped copy under `<data-dir>/backups/`; never `cp` the live `.db` while `-wal`/`-shm` files exist. `proofmesh db restore` validates integrity and schema version first.
+- **Tamper evidence:** append-only tables (`events`, `evidence`, `verdicts`, `approvals`) carry a hash chain: `row_hash = sha256(prev_hash || canonical_json(row))`. `proofmesh db verify` walks the chain and reports breaks.
+- **Honest limitation:** an agent running as the same OS user *can* reach the data dir with its shell. Keeping the DB outside the repo prevents accidental/drive-by edits; the hash chain *detects* row edits unless the whole chain is rebuilt; it does not *prevent* a determined process with the same privileges. Stronger isolation (separate OS user, sandboxed agent) is future work and must not be claimed in the demo.
+- **Encryption at rest:** not in MVP; rely on host disk encryption.
+- **Artifacts:** bounded check output and screenshots under `<data-dir>/projects/<project-id>/artifacts/` with controlled file names and configured retention.
 
 ## 15. CLI commands
 
@@ -609,8 +581,11 @@ proofmesh handoff <session-id>
 proofmesh hook <event-name>
 proofmesh task lint <file>
 proofmesh task render <task-id> --revision <n>
+proofmesh task show <task-id>
 proofmesh mcp
-proofmesh db migrate | backup | restore <file> | verify
+proofmesh report <session-id> --format md|json
+proofmesh demo
+proofmesh db backup | restore <file> | verify
 ```
 
 Exact syntax is implementation-flexible. Return meaningful exit codes: `0` accepted/check pass, `1` policy blocker or failed check, `2` invalid configuration/input, `3` unknown/unavailable enforcement or verification state. Document behavior and never collapse `UNKNOWN` into exit code `0`.
@@ -625,8 +600,9 @@ Exact syntax is implementation-flexible. Return meaningful exit codes: `0` accep
 - Avoid capturing secrets from environment or logs; redact likely credentials and offer local-only retention.
 - Protect artifacts from path traversal; do not allow a model-supplied artifact path to read arbitrary files.
 - Local stdio transport avoids exposing a listening network server in MVP; remote transport requires additional controls.
-- Container hardening: non-root user, read-only root filesystem, `--cap-drop ALL`, `no-new-privileges`, tmpfs `/tmp`, workspace mounted read-only, `--network none` unless a remote DB is configured. Never mount the Docker socket into the ProofMesh container.
-- Database files live in the protected `/data` volume (`0700`/`0600`), outside the agent-writable workspace; remote DB credentials come from secret files/env as `SecretStr` and require TLS.
+- ProofMesh never writes to the workspace; check subprocesses get a minimal environment, a controlled working directory and `/tmp`-redirected caches where the tool supports it.
+- Database and artifacts live in the per-user data directory (`0700`/`0600`), outside the agent-writable workspace; all SQL is parameterized.
+- Agents cannot create or change TaskFiles directly; only ProofMesh decisions (policy rule or user approval) produce revisions (§6).
 - All external input is validated by strict Pydantic models with size caps before use (§5.6); the TaskFile parser rejects unknown sections, YAML aliases and custom tags.
 - Test scripts remain potentially arbitrary code. Only run the prepared demo app for the event; future untrusted-repository support requires a sandbox or a clear opt-in security boundary.
 
@@ -654,7 +630,8 @@ Exact syntax is implementation-flexible. Return meaningful exit codes: `0` accep
 - Runner times out and captures bounded output.
 - Markdown TaskFile: valid file parses; unknown/duplicate headings, malformed AC lines, duplicate AC IDs, unknown gate IDs, YAML aliases and oversized files are rejected with line numbers; `parse(render(m)) == m`; cosmetic whitespace edits keep the canonical digest stable.
 - Strict models reject coercible-but-wrong types, extra fields, naive datetimes, path traversal (`../`, absolute, symlink escape) and oversized collections; secrets never appear in `repr`/errors.
-- Storage contract tests run the same suite against SQLite and Postgres (Postgres via a local container in CI; Neon optional/manual); hash-chain verification detects a modified row; `quick_check` failure blocks start-up; backup/restore round-trips.
+- Storage: migrations apply in order and are idempotent; concurrent writers (two processes) do not lose writes; hash-chain verification detects a modified row; `quick_check` failure blocks start-up; backup/restore round-trips; no query uses string-formatted SQL (lint rule/grep test).
+- TaskFile ownership: agent `propose_task`/`propose_contract_amendment` never produces an approved revision without a policy rule or user approval; scope expansion is escalated; rejected proposals return reasons.
 
 ### Integration tests (must-have)
 
@@ -664,7 +641,7 @@ Exact syntax is implementation-flexible. Return meaningful exit codes: `0` accep
 - Fix the issue, rerun checks, and reach `ACCEPTED` only after fresh evidence exists.
 - Modify source after a passing check and observe stale evidence.
 - Invoke the chosen host hook using an actual sample payload and validate host-specific response semantics.
-- Container smoke test: build the image, run `proofmesh init/verify/status` against the demo repo with the workspace mounted read-only, `--read-only` root FS and `--network none`; data persists across container restarts via the named volume.
+- Clean-install smoke test: `uvx proofmesh demo` on a fresh machine/CI runner with no network after install completes the seeded demo and writes `report.md` + `report.json`; the repo working tree is unchanged afterwards.
 
 ### End-to-end demo test
 
@@ -672,8 +649,8 @@ Use a prepared repository and a known task. The test must not require an LLM to 
 
 ## 19. Hackathon implementation order
 
-0. Project skeleton: `pyproject.toml` (Python 3.14), strict base models/types, settings, Dockerfile + compose that run `proofmesh --version`.
-1. Markdown TaskFile parser/renderer, TaskFile model, canonical digest, approval and revision store (SQLite backend behind the storage port).
+0. Project skeleton: `pyproject.toml` (Python 3.14, uv), strict base models/types, config, CI (ruff, pyright, pytest).
+1. Markdown TaskFile parser/renderer, TaskFile model, canonical digest, ProofMesh-owned proposal/decision/revision store (SQLite).
 2. Git baseline/snapshot plus scope report.
 3. Configured command runner and evidence records.
 4. Deterministic evaluator and evidence freshness.
@@ -683,7 +660,7 @@ Use a prepared repository and a known task. The test must not require an LLM to 
 8. One lifecycle hook adapter and enforcement-health report.
 9. Optional small UI and Playwright smoke check only if the end-to-end path is already reliable.
 
-If time slips, cut dashboard breadth, optional browser automation and the Postgres/Neon backend (keep the storage port) before cutting contract integrity, evidence freshness, runtime validation, or the working hook.
+If time slips, cut dashboard breadth and optional browser automation before cutting contract integrity, evidence freshness, runtime validation, or the working hook.
 
 ## 20. Definition of done for MVP
 
@@ -698,7 +675,8 @@ The MVP is done when, in the prepared sample repository:
 - A real supported agent can query ProofMesh and the chosen hook can request another attempt when the host supports it.
 - After the fix, required checks produce fresh evidence and the evaluator accepts the task.
 - Reports clearly label incomplete integration coverage and unverified behavior.
-- The full flow runs from the published container image with the workspace mounted read-only and state persisted in the `/data` volume.
+- The full flow runs from a clean `uv` install with state persisted in the data directory and the repo working tree untouched by ProofMesh.
+- Review-readiness checklist in §22 is complete.
 
 ## 21. Official and adjacent references
 
@@ -713,34 +691,45 @@ The MVP is done when, in the prepared sample repository:
 - BeforeDone (adjacent project): https://github.com/rrrrrredy/beforedone
 - Python 3.14 release notes: https://docs.python.org/3.14/whatsnew/3.14.html
 - Pydantic strict mode: https://docs.pydantic.dev/latest/concepts/strict_mode/
-- pydantic-settings: https://docs.pydantic.dev/latest/concepts/pydantic_settings/
 - SQLite WAL (incl. network filesystem limitation): https://www.sqlite.org/wal.html
 - SQLite online backup API: https://www.sqlite.org/backup.html
-- SQLAlchemy 2.x Core: https://docs.sqlalchemy.org/en/20/core/
-- Alembic: https://alembic.sqlalchemy.org/
-- Neon connection pooling: https://neon.tech/docs/connect/connection-pooling
-- uv in Docker: https://docs.astral.sh/uv/guides/integration/docker/
-- Docker official Python image: https://hub.docker.com/_/python
+- Python `sqlite3` module: https://docs.python.org/3.14/library/sqlite3.html
+- Python `tomllib`: https://docs.python.org/3.14/library/tomllib.html
+- uv tools (`uv tool install`, `uvx`): https://docs.astral.sh/uv/guides/tools/
 
-## 22. Ideation log and open questions
+## 22. Review readiness (jury + AI code reviewer)
+
+The submission will be evaluated by human judges and an AI agent that reviews the code. Both reward the same things: a clear story, code that matches its claims, and evidence that it works.
+
+- **One-command, offline demo:** `uvx proofmesh demo` (or `uv run proofmesh demo`) runs the seeded scenario end-to-end and writes `report.md` + `report.json`. No API keys or network needed for the core path.
+- **README first screen:** problem → what ProofMesh does (Intent / Intervention / Evidence) → 30-second demo command → architecture diagram → honest limitations (enforcement levels, same-user DB access, heuristic loop detection).
+- **Claims match code:** every capability in the README maps to a module and a test; no "coming soon" features presented as working; simulated events are labelled as simulated.
+- **Small, readable codebase:** no unused scaffolding or empty modules; module docstrings explain each component's role; strict typing; consistent naming with the PRD/TRD vocabulary (TaskFile, Evidence, Verdict, Gate).
+- **Green CI:** ruff, pyright (strict) and pytest run on every push; badge in README.
+- **Tests as documentation:** test names read as requirements (`test_failed_mandatory_gate_blocks_acceptance`, `test_agent_cannot_approve_own_amendment`).
+- **Traceability:** README links PRD requirement IDs (FR-xx) to tests; the decision log (§23) shows reasoning for reviewers.
+- **Security hygiene visible in code:** parameterized SQL, no `shell=True`, allowlisted gates, strict Pydantic models at boundaries.
+
+## 23. Ideation log and open questions
 
 Decisions taken during ideation (branch `devin/ideation`):
 
-- **D-1** TaskFile is structured Markdown (YAML front matter + fixed headings), not pure YAML — LLM- and human-friendly, still deterministic to parse (§6).
+- **D-1** TaskFile is structured Markdown (front matter + fixed headings), not pure YAML — LLM- and human-friendly, still deterministic to parse (§6).
 - **D-2** Target runtime is Python 3.14 (§2).
-- **D-3** ProofMesh ships and runs as a single lightweight, portable container image (§3.1).
-- **D-4** SQLite is the default store, kept in a protected data volume outside the workspace; Postgres (e.g. Neon) is an opt-in backend behind the same storage interface (§14).
+- **D-3** *(revised)* No Docker in the runtime path; native Python package installed with `uv`. Docker may return later only as an optional sandbox for check execution (§3.1). Supersedes the earlier "run everything in one container" design (see git history of this branch).
+- **D-4** *(revised)* SQLite only, stdlib `sqlite3`, hand-written parameterized SQL; no Postgres/Neon, no ORM/migration framework. JSON for exports only (§14).
 - **D-5** Pydantic v2 strict models validate every trust boundary; invalid input fails closed (§5.6).
+- **D-6** Scope is the hackathon demo; no team/cloud/multi-machine features.
+- **D-7** ProofMesh owns the TaskFile lifecycle and acts as project manager for task intent: agents only propose; ProofMesh rejects, auto-accepts under trusted policy, or escalates to the user (§6). It still does not write code, plan implementations or schedule agents.
+- **D-8** The deliverable is judged by a jury *and* an AI code reviewer; review readiness is a P0 requirement (§22).
 
 Open questions:
 
-1. **TaskFile grammar details:** exact AC/assumption line syntax; whether scope/gates stay in front matter or move into body sections; where TaskFiles live (repo vs. user-controlled dir) given the repo is agent-writable.
-2. **Digest normalization:** which Markdown changes count as "cosmetic" (whitespace only?) vs. intent changes.
-3. **Hook latency in Docker:** `docker run` per hook vs. long-lived container + `docker exec`; acceptable latency budget per host hook.
-4. **Checks needing writes / project toolchains:** tmpfs redirection vs. per-run overlay copy of the workspace; derived per-project images vs. a sandboxed sibling runner (without exposing the Docker socket).
-5. **DB access layer:** SQLAlchemy Core + Alembic vs. hand-written SQL per backend (dependency weight vs. duplication).
-6. **Remote DB scope:** is Neon for multi-machine/team history (future) or also a hackathon demo item? How are artifacts shared when the DB is remote?
-7. **Encryption at rest** for the SQLite file (SQLCipher, column-level, or host disk encryption only).
-8. **Hash-chain anchoring:** where to publish the chain head so DB rewrites become detectable.
-9. **Base image:** `python:3.14-slim` vs. alpine/distroless after measuring size and start-up time.
-10. **Docker Desktop on macOS/Windows:** confirm WAL behaviour and performance with named volumes vs. bind mounts.
+1. **How autonomous is the "project manager"?** Which amendment types may ProofMesh auto-accept without the user (e.g. narrowing scope, adding ACs)? Should the initial contract ever be auto-approved?
+2. **Front matter: YAML vs TOML.** TOML front matter (`+++`) parses with stdlib `tomllib` (drops PyYAML, avoids YAML aliases/implicit typing pitfalls) but needs a small hand-written renderer; YAML is more familiar to LLMs.
+3. **TaskFile grammar details:** exact AC/assumption line syntax; whether scope/gates stay in front matter or move into body sections.
+4. **Digest normalization:** which Markdown changes count as "cosmetic" (whitespace only?) vs. intent changes.
+5. **Checks that write files:** redirect caches to `/tmp` per tool vs. run checks on a temporary copy/worktree of the repo.
+6. **Which agent harness for the demo** (Codex hooks or another available harness) and its hook latency budget.
+7. **Dogfooding:** should ProofMesh's own development be governed by ProofMesh TaskFiles, and shown to the jury as evidence?
+
