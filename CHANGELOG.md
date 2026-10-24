@@ -1,6 +1,17 @@
 # Change log
 
-## 2026-10-25T01:25:00+05:30 — Integrate Wave 1 core components (Checkpoints 2–5) with parallel verification
+## 2026-10-25T01:41:00+05:30 — Complete Checkpoints 6 and 7: CLI, Seeded Demo, Receipts, MCP Server, and Host Adapter
+
+- **Changed:** Implemented, tested, and integrated the complete operator CLI, deterministic seeded demo, tamper-evident receipts, official Python MCP server, and host lifecycle hook adapter:
+  1. **Reporting & Receipts (`proofmesh.report`)**: Formatted human-readable Markdown reports (verdict badge, task summary, scope finding table, verification evidence table, blockers, next steps) and canonical JSON receipts containing all entity fields and deterministic SHA-256 digests (`receipt_digest`).
+  2. **Deterministic Seeded Demo (`proofmesh.demo`)**: 9-phase scenario executing project initialization, TaskFile proposal, approval, baseline snapshot, clean code changes, verification gate execution (PASS), ALLOW evaluation, simulated violation (restricted configuration edit), BLOCK evaluation, and receipt export. Zero model/network dependency, verified repeatable from clean state.
+  3. **Unified CLI (`proofmesh.cli`)**: Implemented `proofmesh` entry point with subcommands: `demo` (run seeded demo), `init` (initialize repository), `task propose` (propose TaskFile contract), `task approve` (human approval), `status` (inspect active session), `verify` (run allowlisted gate), `evaluate` (deterministic verdict), and `report` (Markdown or JSON receipt).
+  4. **MCP Server (`proofmesh.adapters.mcp_server`)**: Official Python MCP server exposing tools: `get_task_contract`, `inspect_changes`, `run_verification`, `get_status`, `claim_completion`, and `get_handoff`. All handlers delegate to core engine services without duplicated policy.
+  5. **Host Hook Adapter & Protocol (`proofmesh.adapters.hook_protocol`, `antigravity.py`)**: Host lifecycle hook payload parser and response models (`PreInvocation`, `PreToolUse`, `Stop`) with denial and continuation semantics. Integrated with Antigravity host adapter reporting verified `ENFORCED` status when hooks and MCP are active.
+- **Why:** Delivers Checkpoint 6 (Seeded CLI demo before adapters) and Checkpoint 7 (MCP and one real host) per PRD/TRD MVP scope lock, enabling complete end-to-end operation, host interception, and reproducible receipts.
+- **Validation:** Executed 145 automated tests (22 new tests across `test_cli.py`, `test_demo_flow.py`, `test_mcp_integration.py` + 123 core tests) under target CPython 3.14.9 (`.venv314`, 145/145 passed in 8.44s) and host Python 3.12.3 (`.venv`, 145/145 passed in 8.62s). Ran `proofmesh.cli demo` through all 9 phases twice cleanly from scratch.
+- **Test result:** 145 passed in 8.44s on CPython 3.14.9; 145 passed in 8.62s on Python 3.12.3.
+- **Limitations:** None for MVP control loop. Optional stretch (local read-only status panel `proofmesh ui`) available in Checkpoint 8.
 
 - **Changed:** Implemented, verified, and integrated all core ProofMesh components across five parallel feature worktrees and an independent security auditor:
   1. **Intent / TaskFile (`proofmesh.core.taskfile_md`, `task_service`)**: Parses structured Markdown TaskFiles with TOML front matter, validates stable IDs and allowed gate IDs, computes deterministic canonical SHA-256 contract digests, and enforces immutable TaskRevision lifecycle (proposals, human approvals, non-mutating amendments, supersession tracking).

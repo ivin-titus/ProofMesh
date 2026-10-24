@@ -111,3 +111,29 @@ All models inherit from `FrozenModel` and enforce strict validation and immutabi
   - `is_budget_exhausted(session_id: str, gate_id: str, budget: BudgetPolicy) -> bool`: returns True if retries >= `budget.max_retries`.
 - `generate_handoff(task_revision: TaskRevision, verdict: VerdictRecord, scope_result: ScopeAnalysisResult, evidence_records: Sequence[EvidenceRecord]) -> str`:
   - Returns clean Markdown card summarizing: Status (`BLOCKED` / `ALLOW`), Blockers, Gate Summary, and Next Action.
+
+---
+
+## 4. Wave 2 Component Contracts
+
+### Subagent G: `report.py`, `demo.py`, `cli.py`
+- `render_markdown_report(session: Session, task: TaskRevision, snapshot: RepoSnapshot, scope_result: ScopeAnalysisResult, evidence: Sequence[EvidenceRecord], verdict: VerdictRecord) -> str`:
+  - Formats human-readable Markdown report: Header, task summary, revision, approval, verdict badge, scope table, verification table, reasons, handoff next steps.
+- `export_json_receipt(session: Session, task: TaskRevision, snapshot: RepoSnapshot, scope_result: ScopeAnalysisResult, evidence: Sequence[EvidenceRecord], verdict: VerdictRecord) -> dict[str, Any]`:
+  - Formats machine-readable canonical receipt dictionary containing all entity fields and digests.
+- `run_seeded_demo(target_dir: Path | str, db_path: Path | str | None = None) -> dict[str, Any]`:
+  - Runs deterministic end-to-end scenario: init -> propose -> approve -> snapshot -> allowed change -> verify PASS -> evaluate ALLOW -> restricted change -> evaluate BLOCK -> export receipt.
+  - Zero external model or network dependency; runnable cleanly twice from scratch.
+- `cli.py`:
+  - CLI entry point `proofmesh`: `demo`, `init`, `task propose`, `task approve`, `status`, `verify`, `evaluate`, `report`.
+
+### Subagent H: `hook_protocol.py`, `mcp_server.py`, `antigravity.py`
+- `hook_protocol.py`:
+  - Parses host lifecycle hook payloads (`PreInvocation`, `PreToolUse`, `Stop`).
+  - PreToolUse: denies out-of-scope/restricted edits with actionable reason.
+  - Stop: returns `continue` if session has unfulfilled gates or is `BLOCK`.
+- `mcp_server.py`:
+  - Exposes official MCP tools: `get_task_contract`, `inspect_changes`, `run_verification`, `get_status`, `claim_completion`, `get_handoff`.
+  - Invokes core services (`proofmesh.core`); zero duplicated policy logic.
+- `antigravity.py`:
+  - Connects Antigravity host hook payloads to ProofMesh engine.

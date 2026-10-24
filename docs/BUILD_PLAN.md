@@ -92,24 +92,24 @@ A judge should be able to see the approved contract, what changed, why the task 
 
 **Exit condition:** Repeating a known failure produces bounded intervention; the completion hook cannot loop forever. (Verified: 18 tests in `tests/test_evaluator.py`).
 
-### Checkpoint 6 — Seeded CLI demo before adapters
+### Checkpoint 6 — Seeded CLI demo before adapters (completed)
 
-- [ ] Wire one CLI command to run the seeded scenario.
-- [ ] Persist state and generate a Markdown report plus a JSON receipt.
-- [ ] Restart ProofMesh and reload the same task, evidence and verdict.
-- [ ] Label seeded/simulated events. Never present simulated agent behavior as a live integration.
+- [x] Wire one CLI command to run the seeded scenario (`proofmesh demo`).
+- [x] Persist state and generate a Markdown report plus a JSON receipt.
+- [x] Restart ProofMesh and reload the same task, evidence and verdict.
+- [x] Label seeded/simulated events. Never present simulated agent behavior as a live integration.
 
-**Exit condition:** The core scenario passes twice from a clean state without an LLM or network dependency.
+**Exit condition:** The core scenario passes twice from a clean state without an LLM or network dependency. (Verified: 4 tests in `tests/test_demo_flow.py` and 7 tests in `tests/test_cli.py`).
 
-### Checkpoint 7 — MCP and one real host
+### Checkpoint 7 — MCP and one real host (completed)
 
-- [ ] Expose only the necessary operations: get task contract, inspect changes, run configured verification, get completion status, claim completion, and get handoff.
-- [ ] MCP handlers call the same core services as the CLI; no duplicated policy logic in adapters.
-- [ ] Connect one real agent and verify a request/response.
-- [ ] If the host supports it, wire one actual lifecycle hook to request continuation when evidence is missing.
-- [ ] Report ENFORCED, PARTIAL or UNGUARDED based on what was verified.
+- [x] Expose only the necessary operations: get task contract, inspect changes, run configured verification, get completion status, claim completion, and get handoff (`proofmesh.adapters.mcp_server`).
+- [x] MCP handlers call the same core services as the CLI; no duplicated policy logic in adapters.
+- [x] Connect one real agent and verify a request/response (verified via official MCP Python SDK and stdio transport).
+- [x] If the host supports it, wire one actual lifecycle hook to request continuation when evidence is missing (`proofmesh.adapters.hook_protocol`, `antigravity.py`).
+- [x] Report ENFORCED, PARTIAL or UNGUARDED based on what was verified.
 
-**Exit condition:** The integration is demonstrated honestly. If hook enforcement is unavailable or unreliable, do not claim it can force the agent; show the real MCP path and clearly state its limits.
+**Exit condition:** The integration is demonstrated honestly. If hook enforcement is unavailable or unreliable, do not claim it can force the agent; show the real MCP path and clearly state its limits. (Verified: 11 tests in `tests/test_mcp_integration.py`).
 
 ### Checkpoint 8 — Presentation and one optional stretch
 
