@@ -41,6 +41,10 @@ Testing, code review, agent governance, MCP tooling, and lifecycle hooks exist i
 
 **Rules files vs enforcement:** AGENTS.md and similar files are advice; agents, especially smaller models on large changes, ignore them. ProofMesh turns the same rules into deterministic checks, write-time hook decisions and acceptance verdicts.
 
+**What it adds that skills and rule files don't:** evidence-cited completion (every acceptance criterion must cite fresh, passing evidence), stepwise refactors with a change budget, task state re-injected after context loss or agent switch, focused failure digests with loop detection, and a verdict + receipt on the PR that holds even when an agent has no hooks (TRD §6.6, §13.7).
+
+**Agent-neutral:** one package installed by pasting the repo link into Antigravity, Devin, Claude Code, Codex and others; MCP everywhere, hooks where supported, CI gate always.
+
 **Differentiation to demonstrate:** continuity of task intent and verification evidence across code changes and agent handoffs—not merely a browser tester, generic code reviewer, agent router, or pass/fail test runner.
 
 This is a product hypothesis, not a claim that the overall category or any individual capability is unprecedented.
@@ -195,7 +199,7 @@ Priority definitions: **P0** = necessary for the hackathon end-to-end demo; **P1
 | FR-06 | P0 | Evaluate completion | Return a deterministic verdict from contract, evidence, policy, and integration health. |
 | FR-07 | P0 | Detect repeated failure | Detect repeated normalized failures or no progress; stop automatic retries after a configurable budget. |
 | FR-08 | P0 | Expose core through MCP | A compatible agent can read the contract, inspect changes, run configured verification, retrieve status and request a handoff. |
-| FR-09 | P0 | Integrate Google Antigravity hooks (demo host) | A supported hook records an event and checks completion status; continuation is bounded and documented. |
+| FR-09 | P0 | Integrate lifecycle hooks (Antigravity and Claude-style: Claude Code, Codex, Devin CLI) | A supported hook records an event and checks completion status; continuation is bounded and documented. |
 | FR-10 | P0 | Show enforcement coverage | Report `ENFORCED`, `PARTIAL`, or `UNGUARDED` based on adapter capabilities and health. |
 | FR-11 | P0 | Generate a compact handoff | Include objective, contract revision, changed paths, current code state, failed checks, prior attempts, unresolved assumptions and required next action. |
 | FR-12 | P1 | Trigger browser verification on UI changes | If a configured UI path changes, run a configured Playwright smoke test or explicitly report UI verification unavailable. |
@@ -207,11 +211,15 @@ Priority definitions: **P0** = necessary for the hackathon end-to-end demo; **P1
 | FR-18 | P0 | ProofMesh-owned TaskFiles | Agents can only propose tasks/amendments; every revision results from a recorded ProofMesh decision (policy rule or user approval). |
 | FR-20 | P0 | Mode-based human approvals | Critical decisions are queued for the developer per the profile matrix; agents cannot approve; waivers are explicit and labelled in reports. |
 | FR-21 | P0 | Task kinds with baseline-relative evidence | `feature`, `bugfix` (requires a fail-to-pass gate) and `refactor` (requires invariants; pass → fail is a regression) are supported. |
-| FR-22 | P1 | Multiple host adapters | Codex, Claude Code, Google Antigravity and OpenCode map to one hook protocol (golden-file tested); other MCP tools work in advisory mode. |
+| FR-22 | P1 | Multiple host adapters | Codex, Claude Code, Devin, Google Antigravity and OpenCode map to one hook protocol (golden-file tested); other MCP tools work in advisory mode. |
 | FR-23 | P0 | Test obligations | Mapped code changes require test changes; new tests must run, and (bugfix / opted-in features) fail on baseline; test deletion, skips and count drops need approval. |
 | FR-24 | P0 | Project initialisation | `proofmesh init` detects the stack from files (no code execution) and writes a proposed policy for the developer to approve; works for projects other than the demo. |
 | FR-25 | P0 | Architecture rules as checks | Rules added gradually in policy; violations name file, line, rule and forbidden import; Python checked built-in, other languages via configured tools. |
-| FR-26 | P0 | One-step install | `uvx proofmesh install antigravity` writes a global Antigravity plugin (hooks, MCP server, Agent Skill, short rule) with pinned versions; idempotent; exact `uninstall`; `proofmesh doctor` checks it. `uvx proofmesh init` sets up a project and offers host install. |
+| FR-26 | P0 | One-step install | One package in the repo's `plugin/` subfolder (hooks, MCP server, Agent Skill, short rule, pinned versions) installs by pasting the repo link into supported agents; `proofmesh install <host>` as fallback with exact `uninstall`; `proofmesh doctor` reports what each host loaded. |
+| FR-27 | P0 | Evidence-cited completion | `claim_complete` requires each acceptance criterion to cite evidence IDs; uncited, stale, failed or mismatched citations are listed and block acceptance. |
+| FR-28 | P0 | CI verdict on the PR | `proofmesh verify --ci` re-runs trusted gates on the PR head and posts status + receipt; works for agents without hooks (e.g. cloud Devin). |
+| FR-29 | P1 | Stepwise refactor + change budget | Ordered refactor steps; only the current step is writable; next step unlocks after verification; over-budget changes ask the developer. |
+| FR-30 | P0 | Context re-anchoring | Compact state card injected at session start, after compaction and on handoff between agents. |
 | FR-19 | P0 | Review-ready submission | One-command offline demo produces Markdown + JSON reports; README claims map to code and tests; CI is green. |
 
 ## 10. Quality gates
@@ -310,7 +318,8 @@ The demo uses the developer's **real social media app**, which is mid-refactor: 
 6. **Tests:** code changed without tests, or a new test that also passes on the old code → "not done" with the missing evidence.
 7. **Stop hook:** the agent says "done" → ProofMesh replies `continue: <what is missing>`; after the budget, retries stop and a handoff is written.
 8. **Freshness:** a later edit makes earlier passing evidence `STALE`.
-9. **Accepted:** invariants show no regression, boundary gate and test obligations pass, simplification metrics shown → developer confirms → `ACCEPTED`. Show the enforcement coverage report.
+9. **Accepted:** invariants show no regression, boundary gate and test obligations pass, every criterion cites fresh evidence, simplification metrics shown → developer confirms → `ACCEPTED`. Show the enforcement coverage report.
+10. **Second agent, same contract:** the next refactor step is handed to Devin with the state card; Devin opens a PR; the ProofMesh CI check posts the verdict and receipt on it (blocked until evidence passes).
 
 Because a live agent may not misbehave on cue, keep a recorded run and its exported reports as backup. Label any replayed or seeded events as such.
 
