@@ -15,6 +15,8 @@ import json
 from pathlib import Path
 import pytest
 
+from proofmesh.config import compute_policy_digest
+
 from proofmesh.adapters.antigravity import AntigravityAdapter
 from proofmesh.adapters.hook_protocol import (
     HookDecision,
