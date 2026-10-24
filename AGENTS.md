@@ -54,6 +54,8 @@ Read these files before making implementation changes:
 - Keep local ProofMesh state outside the target project's agent-writable directory.
 - Avoid storing full chat transcripts or private reasoning; keep bounded, relevant event summaries and failure evidence.
 
-## AI-tool requirement caveat
+## AI tools and event guidance
 
-The linked reference template requires Codex for its own DevDay event. The current project context identifies Devin Hacks Kochi, a different event. Follow the current organizers' actual rules; if adopting the template's Codex requirement voluntarily or if organizers confirm it applies, use Codex during implementation and record its real contribution. Never backfill or invent Codex usage.
+The corrected reference branch for Devin Hack Kochi says Codex is not required and that the event has no major AI-usage constraints. The reference is a participant-maintained project branch, not an official organizer rules page, so follow current organizer instructions if they clarify any requirement.
+
+Use appropriate tools for the task. If maintaining AI_USAGE.md, record meaningful assistance truthfully, including the actual tool/model where known, what it contributed, human review, and validation. AI usage notes are a project transparency practice here; do not claim they are an event eligibility requirement. Never fabricate tool usage, test results, or enforcement claims.

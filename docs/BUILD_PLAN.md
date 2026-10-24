@@ -2,8 +2,8 @@
 
 **Status:** Active build checklist  
 **Branch:** hackathon/template-compliance  
-**Updated at:** 2026-10-24T22:09:29+05:30. **Remaining time:** approximately 12 hours 53 minutes until the 11:00 IST deadline on October 25. The checkpoint schedule begins at the earlier 21:50 planning time; resume immediately at the current checkpoint and preserve the final freeze/submission buffer.  
-**Authority:** The PRD defines product behavior; the TRD defines technical boundaries; this plan defines build order and cut lines. Follow AGENTS.md and RULES.md for project workflow. The linked DevDay participant template describes a different event, so its event-specific requirements are not assumed to govern Devin Hacks.
+**Updated at:** 2026-10-24T22:15:13+05:30. **Remaining time:** approximately 12 hours 45 minutes until the 11:00 IST deadline on October 25. The checkpoint schedule begins at the earlier 21:50 planning time; resume immediately at the current checkpoint and preserve the final freeze/submission buffer.  
+**Authority:** The PRD defines product behavior; the TRD defines technical boundaries; this plan defines build order and cut lines. Follow AGENTS.md and RULES.md for project workflow. The linked repository's corrected Devin Hack Kochi branch says its older starter files carried the wrong event details and that Codex is not required. This is participant-maintained guidance, not an official organizer rules page; follow current organizer communications and do not inherit the older template's dates, venue, team limits, credits, or Codex assumptions.
 
 ## 1. The only outcome that matters tonight
 

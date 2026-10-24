@@ -59,4 +59,6 @@ Planned references, not a claim of integrated usage:
 
 ## Event-template note
 
-The repository adopts general workflow practices from the [DevDay Kochi hackathon template](https://github.com/anima-regem/devday-kochi-hackathon-template), but that template names a different event (DevDay Exchange Community Hackathon, 10–11 October 2026). The project context here is Devin Hacks Kochi, 24–25 October 2026. Do not treat the template's event-specific dates, venue, credit terms, or Codex requirement as rules for Devin Hacks unless the current organizers confirm them. See [RULES.md](RULES.md).
+The starter documentation in the [DevDay Kochi template repository](https://github.com/anima-regem/devday-kochi-hackathon-template) originally described **DevDay Exchange Community Hackathon, 10–11 October 2026**. Its [corrected Devin Hack Kochi branch](https://github.com/anima-regem/devday-kochi-hackathon-template/tree/codex/correct-devin-hack-kochi-cainebenoy) says the older event details were inherited from a previous template and that Codex is not required for Devin Hack Kochi.
+
+That correction is in a participant-maintained project branch, not an official organizer rules page. We therefore do not carry forward the old template's dates, venue, registration, team-size limits, credit promises, or Codex/OpenAI-specific assumptions. Follow current organizer instructions for eligibility, logistics, and submission. See [RULES.md](RULES.md) for the distinction.

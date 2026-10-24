@@ -1,6 +1,6 @@
 # Project submission
 
-Complete this file when the working implementation and demo are ready. Follow the submission method and deadline announced by the current event organizers. Do not treat the linked DevDay template's event details as the rules for Devin Hacks.
+Complete this file when the working implementation and demo are ready. Follow the submission method and deadline announced by the current event organizers. The linked template's corrected Devin Hack Kochi branch says its original event details came from an older template and that Codex is not required; because this is a participant-maintained branch, use organizer communications as the authority.
 
 ## Project
 
@@ -32,7 +32,7 @@ Complete this file when the working implementation and demo are ready. Follow th
 
 ## Final checklist
 
-- [ ] The implementation was built from scratch during the applicable event, consistent with its rules.
+- [ ] Implementation provenance, timing, reused components, and AI assistance are disclosed accurately; any applicable organizer rule is followed.
 - [ ] Participant/team details match the event rules.
 - [ ] AI tool usage is accurately documented.
 - [ ] Repository URL, short project description, and working demo are provided.
