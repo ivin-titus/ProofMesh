@@ -209,6 +209,9 @@ Priority definitions: **P0** = necessary for the hackathon end-to-end demo; **P1
 | FR-21 | P0 | Task kinds with baseline-relative evidence | `feature`, `bugfix` (requires a fail-to-pass gate) and `refactor` (requires invariants; pass → fail is a regression) are supported. |
 | FR-22 | P1 | Multiple host adapters | Codex, Claude Code, Google Antigravity and OpenCode map to one hook protocol (golden-file tested); other MCP tools work in advisory mode. |
 | FR-23 | P0 | Test obligations | Mapped code changes require test changes; new tests must run, and (bugfix / opted-in features) fail on baseline; test deletion, skips and count drops need approval. |
+| FR-24 | P0 | Project initialisation | `proofmesh init` detects the stack from files (no code execution) and writes a proposed policy for the developer to approve; works for projects other than the demo. |
+| FR-25 | P0 | Architecture rules as checks | Rules added gradually in policy; violations name file, line, rule and forbidden import; Python checked built-in, other languages via configured tools. |
+| FR-26 | P0 | One-step install | Antigravity plugin bundling hooks, MCP server, Agent Skill and a short rule, with pinned versions and `proofmesh doctor`. |
 | FR-19 | P0 | Review-ready submission | One-command offline demo produces Markdown + JSON reports; README claims map to code and tests; CI is green. |
 
 ## 10. Quality gates
@@ -296,8 +299,9 @@ Do not claim quality improvement from these metrics until they are measured agai
 
 ## 15. Demo narrative
 
-The demo uses the developer's **real social media app**, which is mid-refactor: a vibe-coded, over-engineered codebase being simplified into something boring with clear layers. The agent is **Google Antigravity** with a smaller model, which is exactly where agents break architecture rules on large changes and ignore AGENTS.md.
+The demo uses the developer's **real social media app**, which is mid-refactor: a vibe-coded, over-engineered codebase being simplified into something boring with clear layers. The agent is **Google Antigravity (VS Code extension)** with a smaller model, installed via the ProofMesh plugin, which is exactly where agents break architecture rules on large changes and ignore AGENTS.md.
 
+0. **Setup:** install the plugin, run `proofmesh init` on the app, approve the proposed policy, add a couple of real architecture rules.
 1. **Contract:** the developer approves a `refactor` TaskFile for one real refactor step: target structure, invariants (existing tests), architecture rules as a boundary gate, restricted paths, test obligations.
 2. **Baseline:** ProofMesh records baseline gate results, including pre-existing failures.
 3. **Agent works** in Antigravity; ProofMesh injects a short contract reminder.
@@ -329,7 +333,7 @@ Because a live agent may not misbehave on cue, keep a recorded run and its expor
 - The MVP does not provide formal correctness proofs.
 - User approval can be represented by an explicit local CLI/UI action plus a contract digest; cryptographic identity is future work.
 - A completion hook may request continuation but cannot guarantee that the agent will obey forever or prevent a separate chat message claiming completion.
-- ProofMesh targets any MCP + hooks tool; Codex, Claude Code, Google Antigravity and OpenCode are the initial hook targets. Google Antigravity is the demo host.
+- ProofMesh targets any MCP + hooks tool; Codex, Claude Code, Google Antigravity and OpenCode are the initial hook targets. Google Antigravity (VS Code extension) is the demo host; VS Code hook/plugin support must be verified first.
 
 ## 18. Reference links
 

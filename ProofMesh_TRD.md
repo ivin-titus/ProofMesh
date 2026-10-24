@@ -132,6 +132,9 @@ proofmesh/
       verification.py
       evaluator.py
       handoff.py
+      project_init.py         # `proofmesh init`: stack detection -> proposed policy
+      arch_rules.py           # built-in Python import rules (stdlib ast)
+      test_obligations.py
     adapters/
       mcp_server.py
       hook_protocol.py        # host-neutral hook event/response models
@@ -140,8 +143,6 @@ proofmesh/
         claude_code.py
         antigravity.py
         opencode.py
-  integrations/
-    opencode-plugin/proofmesh.ts   # tiny TS plugin that shells out to `proofmesh hook`
     providers/
       command_check.py
       pytest_check.py
@@ -151,6 +152,15 @@ proofmesh/
       store.py                # hand-written parameterized queries -> Pydantic models
       hashchain.py            # tamper-evident append-only records
       migrations/             # 001_init.sql, 002_*.sql (applied via PRAGMA user_version)
+  integrations/
+    antigravity-plugin/       # one install: hooks + MCP + skill + rule
+      plugin.json
+      hooks.json
+      mcp_config.json
+      skills/proofmesh/SKILL.md
+      rules/proofmesh.md
+    skills/proofmesh/SKILL.md # same Agent Skill for other hosts (.agents/skills, Claude Code, Codex)
+    opencode-plugin/proofmesh.ts   # tiny TS plugin that shells out to `proofmesh hook`
   tests/
     test_task_contract.py
     test_taskfile_md.py
@@ -436,6 +446,46 @@ The project already has test scripts. ProofMesh makes writing proper tests part 
 
 These rules are evidence like any other: tied to the snapshot, marked stale on change, shown in reports with the exact files and tests involved.
 
+### 6.4 Project initialisation (`proofmesh init`)
+
+ProofMesh must drop into any project, not just the demo app. `proofmesh init` inspects the repository read-only and writes a **proposed** `policy.toml` that the developer reviews and approves (policy is trusted config, so a human always approves it; agents can only propose changes).
+
+Detection is simple and file-based, with no network and no code execution:
+
+| Signal | Proposed gates and defaults |
+|---|---|
+| `pyproject.toml` / `requirements*.txt` / `uv.lock` | `pytest` (with `--junitxml`), `ruff check` if configured, test mapping `app/** → tests/**` or `src/<pkg>/** → tests/**` |
+| `package.json` | its `test` / `lint` / `typecheck` scripts, JUnit reporter hint for Jest/Vitest |
+| `go.mod`, `Cargo.toml`, others | `go test ./...`, `cargo test`; otherwise a generic `[gates.custom]` stub to fill in |
+| Migration folders, CI config, lockfiles, `.agents/**`, `.env*` | proposed `restricted_paths` |
+| Existing `AGENTS.md` / `.agents/rules/*.md` | listed in the init report as rules to convert into checks (§6.5); not parsed automatically |
+
+Output: `policy.toml` (proposed), a short init report (what was detected, what is a guess, what needs a human), and the next commands to run. Every detected value is marked `detected` or `default` so nothing looks more certain than it is. `proofmesh init --dry-run` prints without writing.
+
+### 6.5 Architecture rules
+
+Developers add architecture rules gradually, as they find agents breaking them. Rules live in trusted policy and are **checks, not prompts**:
+
+```toml
+[[architecture.rules]]
+id = "AR-1"
+description = "Routes never talk to the database directly"
+files = "app/routes/**"
+forbid_imports = ["app.db", "sqlalchemy"]
+
+[[architecture.rules]]
+id = "AR-2"
+description = "Domain layer has no FastAPI dependency"
+files = "app/domain/**"
+forbid_imports = ["fastapi", "app.routes"]
+```
+
+- **Python:** ProofMesh checks these itself with the standard library `ast` module (imports only, no code execution). Small, deterministic and zero-dependency, which is what the FastAPI demo needs.
+- **Other languages:** a gate of type `architecture-boundaries` runs a configured tool (`dependency-cruiser`, `eslint-plugin-boundaries`, …) and records its result.
+- `proofmesh rules add` appends a rule (developer action). An agent may *propose* a rule; adding a rule makes the contract stricter, so Flow accepts it automatically and Guided/Strict ask (§6.1). Removing a rule always needs approval.
+- Violations name the file, line, rule ID and the forbidden import, so a weak model gets a precise fix instruction.
+- Architecture rules apply to every task in the repository, not just refactors.
+
 
 ## 7. Repository snapshot and scope analysis
 
@@ -637,11 +687,45 @@ Notes:
 - **Weaker models** drift on large changes and ignore long rule files (AGENTS.md). ProofMesh keeps injected text short and specific, blocks rule-breaking writes at the moment they happen, and turns the stop event into "not done: X is missing", with exact gate and file names.
 - **No host loop flag** on `Stop` (unlike Codex `stop_hook_active`). Loop safety relies on ProofMesh's own continuation budget per contract revision and snapshot, plus no-progress detection.
 - **Never use `overwrite`** (argument rewriting). ProofMesh allows, denies or asks; it does not silently change what the agent does.
-- **Hook config is inside the workspace** (`.agents/hooks.json`). `proofmesh integrate antigravity` installs hooks in the **global** `~/.gemini/config/hooks.json` by default, and ProofMesh treats `.agents/hooks.json`, `.agents/mcp_config.json` and its own policy as protected paths. A changed hook config at runtime drops enforcement health to `UNGUARDED` and shows in the report.
+- **Hook config is inside the workspace** (`.agents/hooks.json`). ProofMesh is installed as a **global plugin** (§13.5), not workspace hooks, and ProofMesh treats `.agents/hooks.json`, `.agents/mcp_config.json` and its own policy as protected paths. A changed hook config at runtime drops enforcement health to `UNGUARDED` and shows in the report.
 - Shell commands (`run_command`) can still change files without a write tool. The snapshot diff after each tool call catches these after the fact; this is detection, not prevention, and the report says so.
 - MCP: same stdio server, registered in `~/.gemini/config/mcp_config.json` (global) or `.agents/mcp_config.json` (workspace) with `command`/`args`.
 
-### 13.4 Enforcement caveat
+- **VS Code extension:** the demo runs in Antigravity for VS Code. The extension installs the local `agy` backend; the hooks, plugins and skills pages list App, CLI and the standalone IDE. Whether the VS Code extension loads global hooks/plugins the same way is **not yet confirmed** and is the first thing to verify (spike in §19 step 0). Fallback: the Antigravity App or IDE, which share the same config.
+
+### 13.4 Hook performance and failure behaviour
+
+- Antigravity's default hook timeout is 30 s, and hooks block the agent. ProofMesh hooks stay fast: `PreToolUse`, `PostToolUse`, `PreInvocation` do path/hash work only (target < 200 ms).
+- Test suites never run inside `PreToolUse`. Checks run through the MCP tool `run_verification` (or the CLI); the `Stop` hook evaluates the evidence that exists and, if it is missing or stale, answers `continue: run run_verification for gates X, Y`. The `Stop` handler gets a longer `timeout` only for baseline runs at session start, if needed.
+- **If ProofMesh itself fails** (crash, invalid payload, timeout): writes to protected paths fail closed (`deny`); other tool calls fail open (`allow`) so a ProofMesh bug cannot freeze the developer's agent; the `Stop` hook never reports acceptance; the failure is recorded and enforcement health drops to `PARTIAL`.
+
+### 13.5 Distribution: Antigravity plugin + Agent Skill
+
+Installing ProofMesh should be one step, like other agent tooling. Antigravity plugins bundle exactly what ProofMesh needs (https://antigravity.google/docs/plugins):
+
+```text
+proofmesh/                         # plugin directory
+  plugin.json                      # {"$schema": "https://antigravity.google/schemas/v1/plugin.json", "name": "proofmesh", "description": "..."}
+  hooks.json                       # SessionStart, PreInvocation, PreToolUse, PostToolUse, Stop -> `uvx proofmesh==<pinned> hook <event> --host antigravity`
+  mcp_config.json                  # stdio server: `uvx proofmesh==<pinned> mcp`
+  skills/proofmesh/SKILL.md        # how the agent works with ProofMesh
+  rules/proofmesh.md               # short always-on rule: "ProofMesh owns task acceptance"
+```
+
+Install paths: `agy plugin install https://github.com/ivin-titus/ProofMesh` (subdirectory layout to verify), or copy the folder to `~/.gemini/config/plugins/proofmesh/`. Then `proofmesh init` in the project.
+
+**The skill** follows the open Agent Skills format (`SKILL.md` with `name` + `description` front matter), so the same file works in Antigravity, Claude Code and Codex. Best practices applied:
+
+- Third-person description with trigger keywords ("Works with ProofMesh task contracts, verification and acceptance. Use when starting, changing or finishing a coding task in a repository governed by ProofMesh.").
+- Short body with a decision tree: start task → `get_task_contract`; unsure about a file → `inspect_changes`; done → `run_verification` then `get_completion_status`; blocked → read the reason, fix, re-verify; need scope change → `propose_contract_amendment`, never edit policy.
+- Treat ProofMesh as a black box: call tools / `proofmesh --help`, don't read its source.
+- No secrets, no network, no instructions that claim enforcement the host doesn't provide.
+
+The skill is guidance; hooks are enforcement. The report never counts the skill as enforcement.
+
+Other best practices for distribution: pinned versions in hook/MCP commands (no floating `latest`), signed release tags, a `CHANGELOG`, `proofmesh doctor` to check install + hook wiring + enforcement health, and `proofmesh uninstall --host antigravity` that removes exactly what was added.
+
+### 13.6 Enforcement caveat
 
 MCP-only mode is advisory. A lifecycle hook can request continuation only to the extent the host supports and honors it. Git/CI gates can enforce merge policy independently. A local agent can still claim completion in chat; ProofMesh governs its own acceptance state, not arbitrary text in the host conversation.
 
@@ -704,6 +788,9 @@ proofmesh task render <task-id> --revision <n>
 proofmesh task show <task-id>
 proofmesh approvals list | approve <id> | reject <id> --reason <text> | waive <gate-id> --reason <text>
 proofmesh integrate <host> [--write]
+proofmesh init [--dry-run]
+proofmesh rules add | list | propose
+proofmesh doctor
 proofmesh mcp
 proofmesh report <session-id> --format md|json
 proofmesh demo
@@ -756,6 +843,9 @@ Exact syntax is implementation-flexible. Return meaningful exit codes: `0` accep
 - Decision matrix: each (decision, profile) cell in §6.1 behaves as specified; no profile turns a failed mandatory gate into `ACCEPTED`; waivers are labelled.
 - Baseline-relative evidence: pass→fail is a regression; fail→fail is reported as pre-existing; `bugfix` tasks without a fail-to-pass gate cannot be accepted; `refactor` tasks require `## Invariants`.
 - Test obligations: missing mapped tests → `BLOCK`; skipped/absent new tests detected from JUnit XML; fail-on-baseline check via temporary worktree; test-count drop, deleted tests and new skip/only markers → `REQUIRE_APPROVAL`.
+- `proofmesh init`: fixture repos (FastAPI/pytest, Node/Vitest, Go, unknown) produce the expected proposed policy; nothing is executed; values are labelled `detected`/`default`.
+- Architecture rules: `ast` checker catches `import x`, `from x import y`, relative imports and aliases; ignores strings/comments; reports file, line, rule ID.
+- Plugin bundle: `plugin.json` validates against the published schema; `hooks.json` commands point to the pinned version; hook handlers meet the latency budget; ProofMesh internal errors follow the fail-closed/fail-open rules (§13.4).
 - Antigravity adapter: golden files for every event (doc examples + payloads captured from the installed version); `Stop` continuation respects the budget; protected hook-config edits are denied and drop enforcement health.
 - Host adapters: recorded sample payloads for each supported host map to the same `HookEvent`; `HookDecision` maps back to valid host output (golden-file tests).
 - TaskFile ownership: agent `propose_task`/`propose_contract_amendment` never produces an approved revision without a policy rule or user approval; scope expansion is escalated; rejected proposals return reasons.
@@ -777,6 +867,7 @@ Use a prepared repository and a known task. The test must not require an LLM to 
 ## 19. Hackathon implementation order
 
 0. Project skeleton: `pyproject.toml` (Python 3.14, uv), strict base models/types, config, CI (ruff, pyright, pytest).
+0. Spike (first hour): confirm Antigravity for VS Code loads a global plugin with hooks + MCP; capture real payloads as golden files.
 1. Markdown TaskFile parser/renderer, TaskFile model, canonical digest, ProofMesh-owned proposal/decision/revision store (SQLite).
 2. Git baseline/snapshot plus scope report.
 3. Configured command runner and evidence records.
@@ -784,7 +875,7 @@ Use a prepared repository and a known task. The test must not require an LLM to 
 5. Loop/retry detector and handoff packet.
 6. CLI end-to-end flow.
 7. MCP tools backed by the same core.
-8. Host-neutral hook protocol + Antigravity adapter end-to-end, enforcement-health report; then other host mappings (golden-file tested) as time allows.
+8. `proofmesh init`, architecture rules. Host-neutral hook protocol + Antigravity adapter and plugin end-to-end, enforcement-health report; then other host mappings (golden-file tested) as time allows.
 9. Optional small UI and Playwright smoke check only if the end-to-end path is already reliable.
 
 If time slips, cut dashboard breadth and optional browser automation before cutting contract integrity, evidence freshness, runtime validation, or the working hook.
@@ -864,14 +955,17 @@ Decisions taken during ideation (branch `devin/ideation`):
 - **D-13** Keep it simple but high-impact for the demo.
 - **D-14** Primary demo host is Google Antigravity (used with smaller models); other hosts stay supported via the same protocol (§13.3).
 - **D-15** The demo uses the developer's real social media app during its refactor. Pitch: AGENTS.md is advice agents ignore; ProofMesh turns the same rules into checks and hooks.
+- **D-17** Demo surface: Antigravity for VS Code (fallback: Antigravity App/IDE, same config).
+- **D-18** `proofmesh init` makes ProofMesh work on any project: file-based detection → proposed policy → human approval (§6.4).
+- **D-19** Architecture rules are trusted-policy checks, added gradually; built-in `ast` checker for Python, configured tools for other languages (§6.5).
+- **D-20** Distribution: one Antigravity plugin (hooks + MCP + Agent Skill + rule) with pinned versions; the skill is portable to other hosts (§13.5).
 - **D-16** ProofMesh enforces test obligations: tests with every change, new tests must run and fail on baseline, no test weakening (§6.3).
 
 Open questions:
 
-1. **Social media app stack:** languages, frameworks, test runner (does it emit JUnit XML?), and whether ProofMesh config can be prepared against a copy of the repo.
-2. **Architecture rules:** the concrete rules agents keep breaking (e.g. "UI never imports the DB layer") → these become the boundary gate config.
-3. **Antigravity surface:** App, IDE or CLI for the recording (hooks behave the same; config paths differ slightly).
-4. **TaskFile grammar details:** exact AC/invariant/assumption line syntax.
-5. **Digest normalization:** which Markdown changes count as "cosmetic" vs. intent changes.
-6. **Checks that write files:** redirect caches per tool vs. run checks on a temporary worktree.
-7. **Check cost:** baseline gates at session start plus fail-on-baseline runs add time; allow reusing results for an unchanged snapshot?
+1. **VS Code extension support:** does Antigravity for VS Code load global plugins/hooks like the App/IDE? (verify first — §19 step 0)
+2. **Plugin install from GitHub:** can `agy plugin install <repo-url>` install from a subdirectory, or does the plugin need its own repo / repo-root layout?
+3. **TaskFile grammar details:** exact AC/invariant/assumption line syntax.
+4. **Digest normalization:** which Markdown changes count as "cosmetic" vs. intent changes.
+5. **Checks that write files:** redirect caches per tool vs. run checks on a temporary worktree.
+6. **Check cost:** baseline gates at session start plus fail-on-baseline runs add time; allow reusing results for an unchanged snapshot?
