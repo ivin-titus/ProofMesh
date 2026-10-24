@@ -119,11 +119,35 @@ def _validate_and_prepare_target(target_path: Path) -> None:
 
     Refuses to modify non-empty directories that do not contain the dedicated
     ProofMesh fixture marker file (.proofmesh-fixture), or directories that contain
-    colliding files that cannot be proven to be prior demo-owned artifacts.
+    colliding files that cannot be proven to be prior demo-owned artifacts, or
+    symlink escapes resolving outside target directory.
     """
+    canonical_target = target_path.resolve()
+
     if target_path.exists():
         if not target_path.is_dir():
             raise ValueError(f"Target path '{target_path}' exists and is not a directory.")
+
+        # Check key subpaths for symlink escapes
+        for sub_name in ("src", "tests", "config"):
+            sub_path = target_path / sub_name
+            if sub_path.is_symlink():
+                resolved_sub = sub_path.resolve()
+                if not resolved_sub.is_relative_to(canonical_target):
+                    raise ValueError(
+                        f"Symlink escape detected in target directory: subpath '{sub_name}' "
+                        f"resolves to '{resolved_sub}' outside canonical target root '{canonical_target}'."
+                    )
+
+        # Recursively check all entries for symlink escapes
+        for entry in target_path.rglob("*"):
+            if entry.is_symlink():
+                resolved_entry = entry.resolve()
+                if not resolved_entry.is_relative_to(canonical_target):
+                    raise ValueError(
+                        f"Symlink escape detected in target directory: entry '{entry.name}' "
+                        f"resolves to '{resolved_entry}' outside canonical target root '{canonical_target}'."
+                    )
 
         entries = list(target_path.iterdir())
         if entries:
@@ -215,6 +239,22 @@ def _validate_and_prepare_database(db_file: Path, project_id: str) -> None:
                             f"Database path '{db_file}' contains project '{project_id}' with non-demo tasks ({foreign_tasks}). "
                             f"Refusing to overwrite or reset caller-supplied database."
                         )
+                if "task_revisions" in tables:
+                    cursor.execute("SELECT task_id FROM task_revisions;")
+                    rev_tasks = {row[0] for row in cursor.fetchall()}
+                    if rev_tasks - {"task-calc-extension"}:
+                        raise ValueError(
+                            f"Database path '{db_file}' contains non-demo task revisions ({rev_tasks - {'task-calc-extension'}}). "
+                            f"Refusing to reset caller-supplied database."
+                        )
+                if "sessions" in tables:
+                    cursor.execute("SELECT task_id FROM sessions;")
+                    sess_tasks = {row[0] for row in cursor.fetchall()}
+                    if sess_tasks - {"task-calc-extension"}:
+                        raise ValueError(
+                            f"Database path '{db_file}' contains sessions for non-demo tasks ({sess_tasks - {'task-calc-extension'}}). "
+                            f"Refusing to reset caller-supplied database."
+                        )
         finally:
             conn.close()
     except sqlite3.DatabaseError as e:
@@ -285,10 +325,42 @@ def _reset_demo_database(db_file: Path, project_id: str) -> None:
         conn.close()
 
 
+def _safe_write_report(file_path: Path, content: str) -> None:
+    """Write report file only if it doesn't exist or is proven to be demo-owned."""
+    if file_path.exists():
+        try:
+            existing = file_path.read_text(encoding="utf-8")
+        except Exception:
+            raise ValueError(
+                f"Existing report file '{file_path}' cannot be read as UTF-8 text. "
+                "Refusing to overwrite potential user file."
+            )
+        if "task-calc-extension" not in existing and "seeded-demo-project" not in existing:
+            raise ValueError(
+                f"Existing report file '{file_path}' does not contain seeded demo markers "
+                "('task-calc-extension' or 'seeded-demo-project'). Refusing to overwrite user report file."
+            )
+    file_path.write_text(content, encoding="utf-8")
+
+
 def _clean_demo_artifacts(target_path: Path) -> None:
     """Clean known demo artifacts safely without deleting arbitrary directories."""
     for filename in ("report.md", "report.json", "report-blocked.md", "report-blocked.json"):
-        (target_path / filename).unlink(missing_ok=True)
+        rep_file = target_path / filename
+        if rep_file.exists():
+            try:
+                content = rep_file.read_text(encoding="utf-8")
+            except Exception:
+                raise ValueError(
+                    f"Existing report file '{rep_file}' cannot be read as UTF-8 text. "
+                    "Refusing to delete potential user file."
+                )
+            if "task-calc-extension" not in content and "seeded-demo-project" not in content:
+                raise ValueError(
+                    f"Existing file '{rep_file}' does not contain seeded demo markers "
+                    "('task-calc-extension' or 'seeded-demo-project'). Refusing to delete user report file."
+                )
+            rep_file.unlink()
 
     violation_file = target_path / "config" / "security.toml"
     if violation_file.exists():
@@ -442,6 +514,7 @@ def run_seeded_demo(
         evidence_records=[],
         scope_result=violation_scope_result,
         policy=trusted_policy,
+        baseline_snapshot=baseline_snapshot,
     )
     store.save_verdict(block_verdict)
 
@@ -472,14 +545,22 @@ def run_seeded_demo(
         verdict=block_verdict,
     )
 
-    (target_path / "report-blocked.md").write_text(blocked_report_markdown, encoding="utf-8")
-    (target_path / "report-blocked.json").write_text(json.dumps(blocked_receipt_json, indent=2), encoding="utf-8")
+    _safe_write_report(target_path / "report-blocked.md", blocked_report_markdown)
+    _safe_write_report(target_path / "report-blocked.json", json.dumps(blocked_receipt_json, indent=2))
 
     # -------------------------------------------------------------------------
     # Phase 7: Correct the issue safely: revert restricted change, implement allowed code edits in src/math_service.py and tests/test_math.py
     # -------------------------------------------------------------------------
     log("[Phase 7/10] Recovering safely: reverting restricted change and implementing allowed edits...")
-    (config_dir / "security.toml").unlink(missing_ok=True)
+    violation_file = config_dir / "security.toml"
+    if violation_file.exists():
+        content = violation_file.read_text(encoding="utf-8")
+        if content != VIOLATION_SECURITY_CONFIG:
+            raise ValueError(
+                f"Temporary file '{violation_file}' has been altered by an external process. "
+                "Refusing to delete altered file."
+            )
+        violation_file.unlink()
     if config_dir.is_dir() and not any(config_dir.iterdir()):
         config_dir.rmdir()
 
@@ -520,6 +601,7 @@ def run_seeded_demo(
         evidence_records=[clean_evidence],
         scope_result=clean_scope_result,
         policy=trusted_policy,
+        baseline_snapshot=baseline_snapshot,
     )
     store.save_verdict(allow_verdict)
 
@@ -547,8 +629,8 @@ def run_seeded_demo(
         verdict=allow_verdict,
     )
 
-    (target_path / "report.md").write_text(report_markdown, encoding="utf-8")
-    (target_path / "report.json").write_text(json.dumps(receipt_json, indent=2), encoding="utf-8")
+    _safe_write_report(target_path / "report.md", report_markdown)
+    _safe_write_report(target_path / "report.json", json.dumps(receipt_json, indent=2))
 
     log("Deterministic seeded demo recovery loop completed successfully.")
 

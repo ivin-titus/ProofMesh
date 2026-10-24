@@ -6,10 +6,12 @@ bound to ProofMesh core engine, scope analysis, and verification status.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import sys
 from typing import Any
+import uuid
 
 from proofmesh.adapters.hook_protocol import (
     PreInvocationPayload,
@@ -24,18 +26,20 @@ from proofmesh.adapters.hook_protocol import (
     evaluate_stop,
     parse_hook_payload,
 )
-from proofmesh.config import get_default_policy
+from proofmesh.config import compute_policy_digest, resolve_trusted_policy
 from proofmesh.core.evaluator import evaluate_session
 from proofmesh.core.handoff import generate_handoff
 from proofmesh.core.loop_detector import LoopDetector
 from proofmesh.core.repo_snapshot import capture_snapshot
 from proofmesh.core.scope_analyzer import analyze_scope
 from proofmesh.models import (
+    EnforcementLevel,
     IntegrationStatus,
     ScopePolicy,
     Session,
     TrustedPolicy,
     VerdictOutcome,
+    VerdictRecord,
 )
 from proofmesh.storage.paths import get_project_db_path
 from proofmesh.storage.store import ProofMeshStore
@@ -55,7 +59,11 @@ class AntigravityAdapter:
         loop_detector: LoopDetector | None = None,
     ) -> None:
         self.store = store or ProofMeshStore(get_project_db_path("default"))
-        self.policy = policy or get_default_policy()
+        if policy is not None:
+            self.policy = policy
+            self.policy_digest = compute_policy_digest(policy)
+        else:
+            self.policy, self.policy_digest = resolve_trusted_policy()
         self.repo_root = Path(repo_root).resolve() if repo_root else Path.cwd().resolve()
         self.project_id = project_id or "default"
         self.hooks_enabled = hooks_enabled
@@ -193,7 +201,39 @@ class AntigravityAdapter:
 
         root = Path(session.repo_root).resolve()
         current = capture_snapshot(root)
-        baseline = self.store.get_snapshot(session.baseline_snapshot_id) or current
+        baseline = self.store.get_snapshot(session.baseline_snapshot_id)
+        if baseline is None:
+            reason = f"Baseline repository snapshot '{session.baseline_snapshot_id}' not found in store."
+            raw_level = (
+                session.integration_status.value
+                if hasattr(session.integration_status, "value")
+                else session.integration_status
+            )
+            verdict = VerdictRecord(
+                verdict_id=f"verd-{uuid.uuid4().hex[:12]}",
+                session_id=session.session_id,
+                contract_revision=task_rev.revision,
+                snapshot_id=current.snapshot_id,
+                verdict=VerdictOutcome.BLOCK,
+                enforcement_level=EnforcementLevel(raw_level),
+                reasons=(reason,),
+                evidence_ids=(),
+                evaluated_at=datetime.now(timezone.utc),
+            )
+            handoff = (
+                f"## ProofMesh Session Handoff\n\n"
+                f"❌ **BLOCK**: {reason}\n\n"
+                f"Please initialize a valid repository baseline."
+            )
+            return evaluate_stop(
+                payload=payload,
+                verdict=verdict,
+                handoff_summary=handoff,
+                loop_detector=self.loop_detector,
+                budget=self.policy.budget,
+                session_id=session.session_id,
+            )
+
         scope_result = analyze_scope(baseline, current, task_rev.scope)
         evidence_records = self.store.list_evidence_for_session(session.session_id)
 
@@ -204,6 +244,8 @@ class AntigravityAdapter:
             evidence_records=evidence_records,
             scope_result=scope_result,
             policy=self.policy,
+            effective_policy_digest=self.policy_digest,
+            baseline_snapshot=baseline,
         )
 
         budget_exhausted = False

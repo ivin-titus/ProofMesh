@@ -154,6 +154,15 @@ def _get_or_create_active_session(
     revision_num = row["revision"]
 
     baseline = capture_snapshot(repo_root)
+    if not baseline.complete:
+        err_msg = (
+            ", ".join(baseline.observation_errors)
+            if baseline.observation_errors
+            else "unknown observation error"
+        )
+        raise ValueError(
+            f"Cannot initialize session from incomplete baseline observation: {err_msg}"
+        )
     store.save_snapshot(baseline)
 
     session_id = f"sess-{uuid.uuid4().hex[:10]}"
@@ -312,6 +321,17 @@ def cmd_verify(args: argparse.Namespace) -> int:
         return 2
 
     snapshot_before = capture_snapshot(root_dir)
+    if not snapshot_before.complete:
+        err_msg = (
+            ", ".join(snapshot_before.observation_errors)
+            if snapshot_before.observation_errors
+            else "unknown observation error"
+        )
+        print(
+            f"Error: Incomplete repository observation before gate execution: {err_msg}",
+            file=sys.stderr,
+        )
+        return 1
     try:
         evidence = run_gate(
             gate_id=gate_id,
@@ -377,6 +397,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
         scope_result=scope_result,
         policy=policy,
         effective_policy_digest=policy_digest,
+        baseline_snapshot=baseline_snapshot,
     )
     store.save_verdict(verdict)
 
@@ -432,6 +453,7 @@ def cmd_report(args: argparse.Namespace) -> int:
             scope_result=scope_result,
             policy=policy,
             effective_policy_digest=policy_digest,
+            baseline_snapshot=baseline_snapshot,
         )
         store.save_verdict(verdict)
 

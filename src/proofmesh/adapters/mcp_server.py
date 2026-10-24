@@ -478,6 +478,7 @@ def create_mcp_server(
             evidence_records=evidence_records,
             scope_result=scope_result,
             policy=effective_policy,
+            baseline_snapshot=baseline,
         )
         effective_store.save_verdict(verdict)
 
@@ -641,6 +642,7 @@ def create_mcp_server(
             evidence_records=evidence_records,
             scope_result=scope_result,
             policy=effective_policy,
+            baseline_snapshot=baseline,
         )
         effective_store.save_verdict(verdict)
 
@@ -745,6 +747,7 @@ def create_mcp_server(
             evidence_records=evidence_records,
             scope_result=scope_result,
             policy=effective_policy,
+            baseline_snapshot=baseline,
         )
         return generate_handoff(task_rev, verdict, scope_result, evidence_records)
 

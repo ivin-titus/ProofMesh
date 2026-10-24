@@ -745,3 +745,37 @@ def test_generate_handoff_no_required_gates():
     assert "No verification gates required for this task revision." in card
     assert "- **Verdict**: ✅ ALLOW" in card
 
+
+def test_evaluator_incomplete_baseline_snapshot_blocks():
+    """Evaluator fails closed when baseline snapshot is marked incomplete."""
+    task = make_test_task_revision()
+    session = make_test_session()
+    current_snap = make_test_snapshot(SAMPLE_SNAP_1)
+    baseline_snap = RepoSnapshot(
+        snapshot_id=SAMPLE_SNAP_0,
+        repo_root="/repo",
+        git_commit="abcdef0123456789",
+        git_dirty=False,
+        files=(),
+        captured_at=datetime.now(timezone.utc),
+        complete=False,
+        observation_errors=("Permission denied reading root",),
+    )
+    scope = make_clean_scope_result()
+    ev = make_test_evidence(snapshot_after=current_snap.snapshot_id)
+
+    verdict = evaluate_session(
+        session=session,
+        task_revision=task,
+        current_snapshot=current_snap,
+        evidence_records=[ev],
+        scope_result=scope,
+        policy=DEFAULT_TEST_POLICY,
+        effective_policy_digest=DEFAULT_POLICY_DIGEST,
+        baseline_snapshot=baseline_snap,
+    )
+
+    assert verdict.verdict == VerdictOutcome.BLOCK
+    assert any("Incomplete baseline repository snapshot" in r for r in verdict.reasons)
+    assert any("Permission denied reading root" in r for r in verdict.reasons)
+

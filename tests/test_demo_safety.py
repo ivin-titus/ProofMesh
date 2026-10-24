@@ -233,3 +233,96 @@ def test_repeatable_demo_run_preserves_valid_fixture(tmp_path: Path):
     assert res2["status"] == "success"
     assert res2["session"].integration_status.value == "unguarded"
 
+
+def test_refuse_target_with_symlink_escape_subpath(tmp_path: Path):
+    """Demo must refuse target directory if any subpath (src, tests, config) is a symlink resolving outside."""
+    target_dir = tmp_path / "symlink_escape_target"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / FIXTURE_MARKER).write_text("proofmesh-fixture\n", encoding="utf-8")
+
+    outside_dir = tmp_path / "outside_dir"
+    outside_dir.mkdir(parents=True, exist_ok=True)
+
+    # Make target_dir / "src" a symlink to outside_dir
+    src_symlink = target_dir / "src"
+    src_symlink.symlink_to(outside_dir, target_is_directory=True)
+
+    db_file = tmp_path / "storage" / "test.db"
+
+    with pytest.raises(ValueError) as excinfo:
+        run_seeded_demo(target_dir=target_dir, db_path=db_file)
+
+    assert "Symlink escape detected" in str(excinfo.value)
+    assert "src" in str(excinfo.value)
+
+
+def test_refuse_target_with_symlinked_entry_escaping_root(tmp_path: Path):
+    """Demo must refuse target directory if any recursive entry is a symlink resolving outside."""
+    target_dir = tmp_path / "symlink_file_escape_target"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / FIXTURE_MARKER).write_text("proofmesh-fixture\n", encoding="utf-8")
+
+    outside_file = tmp_path / "outside_secret.txt"
+    outside_file.write_text("secret\n", encoding="utf-8")
+
+    # Make target_dir / "leak.txt" a symlink to outside_file
+    leak_symlink = target_dir / "leak.txt"
+    leak_symlink.symlink_to(outside_file)
+
+    db_file = tmp_path / "storage" / "test.db"
+
+    with pytest.raises(ValueError) as excinfo:
+        run_seeded_demo(target_dir=target_dir, db_path=db_file)
+
+    assert "Symlink escape detected" in str(excinfo.value)
+    assert "leak.txt" in str(excinfo.value)
+
+
+def test_refuse_overwriting_or_deleting_foreign_report_files(tmp_path: Path):
+    """Demo must refuse to delete or overwrite user report files lacking demo markers."""
+    target_dir = tmp_path / "foreign_report_target"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / FIXTURE_MARKER).write_text("proofmesh-fixture\n", encoding="utf-8")
+
+    user_report = target_dir / "report.md"
+    user_report.write_text("# My Personal Executive Report\nDo not delete!\n", encoding="utf-8")
+
+    db_file = tmp_path / "storage" / "test.db"
+
+    with pytest.raises(ValueError) as excinfo:
+        run_seeded_demo(target_dir=target_dir, db_path=db_file)
+
+    assert "does not contain seeded demo markers" in str(excinfo.value)
+    assert "report.md" in str(excinfo.value)
+    # File must be preserved
+    assert user_report.is_file()
+    assert user_report.read_text(encoding="utf-8") == "# My Personal Executive Report\nDo not delete!\n"
+
+
+def test_refuse_database_with_foreign_task_revisions(tmp_path: Path):
+    """Demo must refuse database if task_revisions contains tasks other than task-calc-extension."""
+    target_dir = tmp_path / "demo_target"
+    db_file = tmp_path / "storage" / "foreign_rev_pm.db"
+    db_file.parent.mkdir(parents=True, exist_ok=True)
+
+    from proofmesh.models import TaskRevision, RiskLevel, ApprovalStatus, ScopePolicy
+    from proofmesh.storage.store import ProofMeshStore
+    store = ProofMeshStore(db_file)
+    store.create_project("seeded-demo-project", root_path=str(tmp_path / "repo"))
+    foreign_rev = TaskRevision(
+        task_id="task-foreign-rev",
+        revision=1,
+        summary="Foreign task rev",
+        risk_level=RiskLevel.LOW,
+        approval_status=ApprovalStatus.APPROVED,
+        contract_digest="sha256:" + "0" * 64,
+        scope=ScopePolicy(allow_paths=("src/**",)),
+        required_gates=(),
+    )
+    store.save_task_revision(foreign_rev, project_id="seeded-demo-project")
+
+    with pytest.raises(ValueError) as excinfo:
+        run_seeded_demo(target_dir=target_dir, db_path=db_file)
+
+    assert "non-demo tasks" in str(excinfo.value) or "non-demo task revisions" in str(excinfo.value)
+

@@ -1,5 +1,30 @@
 # Change log
 
+## 2026-10-25T04:42:00+05:30 — Pre-Rehearsal Critical Correctness and Filesystem Safety Milestone
+
+- **Changed:** Closed pre-rehearsal correctness and filesystem-safety gaps across CLI, Evaluator, Antigravity adapter, and Demo:
+  1. **Workstream A: CLI Baseline Completeness & Evaluator Consistency (`proofmesh.cli`, `proofmesh.core.evaluator`)**:
+     - Refused session initialization in `cli._get_or_create_active_session` if initial baseline observation is incomplete (`complete=False`), reporting observation errors.
+     - Refused verification gate execution in `cli.cmd_verify` if pre-gate workspace observation is incomplete.
+     - Enhanced `evaluator.evaluate_session` with optional `baseline_snapshot` parameter; fails closed with `VerdictOutcome.BLOCK` (or `REQUIRE_APPROVAL` in guided profile) if baseline snapshot observation was incomplete.
+     - Propagated `baseline_snapshot` across `cli.py`, `mcp_server.py`, and `demo.py`.
+  2. **Workstream B: Antigravity Baseline & Trusted Policy (`proofmesh.adapters.antigravity`)**:
+     - Removed unsafe `baseline = self.store.get_snapshot(...) or current` fallback in `handle_stop`. If baseline snapshot is missing from store, fails closed with a BLOCK verdict and actionable handoff rather than comparing current against current.
+     - Bound adapter initialization to `resolve_trusted_policy()` (respecting `PROOFMESH_POLICY` environment variable) and canonical `policy_digest`.
+     - Enforced policy digest matching and complete baseline/current snapshot observations in `handle_stop`, blocking continuation on invariant violations.
+  3. **Workstream C: Demo Filesystem & Database Safety (`proofmesh.demo`)**:
+     - Implemented strict canonical path containment and symlink escape rejection: verified `target_path` and all subpaths (`src`, `tests`, `config`, and all recursive entries) do not resolve outside the canonical target directory.
+     - Implemented report file ownership checks (`_safe_write_report` and updated `_clean_demo_artifacts`): verified demo markers (`task-calc-extension` or `seeded-demo-project`) before deleting or overwriting report files (`report.md`, `report.json`, `report-blocked.md`, `report-blocked.json`), preserving user files.
+     - Enhanced database safety in `_validate_and_prepare_database`: verified database contains only demo tasks across `tasks`, `task_revisions`, and `sessions` before resetting.
+     - Ensured temporary `config/security.toml` is only unlinked in Phase 7 if content exactly matches `VIOLATION_SECURITY_CONFIG`.
+  4. **Workstream D: Test Verification & Packaging**:
+     - Added comprehensive regression tests in `test_cli.py`, `test_evaluator.py`, `test_hook_security.py`, and `test_demo_safety.py`.
+     - Rebuilt distribution wheel `dist/proofmesh-0.1.0-py3-none-any.whl` and verified installed wheel migration and packaged default policy execution.
+- **Why:** Ensures strict correctness, complete observations, and non-destructive filesystem safety before manual rehearsal and user dogfooding.
+- **Validation:** Executed full test suite of 264 automated tests under target CPython 3.14.9 (`.venv314`, 264/264 passed in 19.29s) and 247 tests under host Python 3.12.3 (`.venv`, 247/247 passed in 16.63s). Verified distribution wheel build, installed wheel migrations, repeated CLI demo runs, and symlink escape rejections.
+- **Test result:** 264 passed in 19.29s on CPython 3.14.9; 247 passed in 16.63s on Python 3.12.3.
+- **Limitations:** Trusted verification gates execute target-repository code with the invoking user's permissions (by design; not a sandbox). Live agent enforcement is reported only when both host hooks and MCP connection are actively verified.
+
 ## 2026-10-25T04:15:00+05:30 — Final Correctness, Invariant Enforcement, and Security Closure Milestone (Checkpoint 10)
 
 - **Changed:** Completed final correctness, invariant consistency, and security hardening across all core layers, adapters, and demo fixtures:

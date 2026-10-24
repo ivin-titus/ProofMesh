@@ -267,3 +267,86 @@ def test_cli_failing_gate_and_blocked_evaluation(
     assert "❌ VERDICT: BLOCK" in eval_out
     assert "Task Handoff:" in eval_out
 
+
+def test_cli_incomplete_baseline_refuses_session_creation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+):
+    """Test CLI refuses to create session when initial baseline capture is incomplete."""
+    work_dir = tmp_path / "incomplete_baseline_repo"
+    work_dir.mkdir()
+    db_file = tmp_path / "incomplete.db"
+    monkeypatch.setenv("PROOFMESH_DB", str(db_file))
+    monkeypatch.setenv("PROOFMESH_PROJECT_ID", "incomplete-project")
+    monkeypatch.chdir(work_dir)
+
+    tf = work_dir / "TASK.md"
+    tf.write_text(SAMPLE_TASKFILE, encoding="utf-8")
+    assert main(["task", "propose", str(tf)]) == 0
+    assert main(["task", "approve", "task-cli-test", "1", "--by", "alice"]) == 0
+    capsys.readouterr()
+
+    # Mock capture_snapshot to return incomplete snapshot
+    from proofmesh.models import RepoSnapshot
+    from datetime import datetime, timezone
+    incomplete_snap = RepoSnapshot(
+        snapshot_id="sha256:" + "9" * 64,
+        repo_root=str(work_dir),
+        git_commit="abcdef0123456789",
+        git_dirty=False,
+        files=(),
+        captured_at=datetime.now(timezone.utc),
+        complete=False,
+        observation_errors=("Unreadable directory /repo/secret",),
+    )
+    monkeypatch.setattr("proofmesh.cli.capture_snapshot", lambda root: incomplete_snap)
+
+    exit_code = main(["verify", "test"])
+    assert exit_code == 2
+    captured = capsys.readouterr()
+    assert "Cannot initialize session from incomplete baseline observation" in captured.err
+    assert "Unreadable directory /repo/secret" in captured.err
+
+
+def test_cli_incomplete_snapshot_before_verify_refuses_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+):
+    """Test CLI refuses to execute verification gate if snapshot before gate is incomplete."""
+    work_dir = tmp_path / "incomplete_verify_repo"
+    work_dir.mkdir()
+    db_file = tmp_path / "incomplete_verify.db"
+    monkeypatch.setenv("PROOFMESH_DB", str(db_file))
+    monkeypatch.setenv("PROOFMESH_PROJECT_ID", "incomplete-verify-proj")
+    monkeypatch.chdir(work_dir)
+
+    tf = work_dir / "TASK.md"
+    tf.write_text(SAMPLE_TASKFILE, encoding="utf-8")
+    assert main(["task", "propose", str(tf)]) == 0
+    assert main(["task", "approve", "task-cli-test", "1", "--by", "alice"]) == 0
+    capsys.readouterr()
+
+    from proofmesh.cli import _get_or_create_active_session, _resolve_project
+    _, _, store = _resolve_project()
+    # Create active session with normal baseline first
+    _get_or_create_active_session(store, "incomplete-verify-proj", work_dir)
+
+    # Now make capture_snapshot return incomplete
+    from proofmesh.models import RepoSnapshot
+    from datetime import datetime, timezone
+    incomplete_snap = RepoSnapshot(
+        snapshot_id="sha256:" + "8" * 64,
+        repo_root=str(work_dir),
+        git_commit="abcdef0123456789",
+        git_dirty=False,
+        files=(),
+        captured_at=datetime.now(timezone.utc),
+        complete=False,
+        observation_errors=("Permission denied during pre-gate scan",),
+    )
+    monkeypatch.setattr("proofmesh.cli.capture_snapshot", lambda root: incomplete_snap)
+
+    exit_code = main(["verify", "test"])
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "Incomplete repository observation before gate execution" in captured.err
+    assert "Permission denied during pre-gate scan" in captured.err
+

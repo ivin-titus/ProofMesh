@@ -45,6 +45,7 @@ def evaluate_session(
     scope_result: ScopeAnalysisResult,
     policy: TrustedPolicy,
     effective_policy_digest: str | None = None,
+    baseline_snapshot: RepoSnapshot | None = None,
 ) -> VerdictRecord:
     """Evaluate session status deterministically against policy, scope, and evidence.
 
@@ -56,6 +57,7 @@ def evaluate_session(
         scope_result: Scope analysis result between baseline and current snapshot.
         policy: Project trusted policy.
         effective_policy_digest: Authoritative digest of current trusted policy (optional).
+        baseline_snapshot: Optional baseline repository snapshot for observation completeness verification.
 
     Returns:
         VerdictRecord containing outcome (ALLOW or BLOCK), reasons, fresh evidence IDs,
@@ -65,7 +67,19 @@ def evaluate_session(
     verdict = VerdictOutcome.ALLOW
     evidence_ids: list[str] = []
 
-    # 1. Snapshot Completeness Check (fail closed if snapshot observation failed)
+    # 1. Snapshot Completeness Checks (fail closed if snapshot observation failed)
+    if baseline_snapshot is not None and getattr(baseline_snapshot, "complete", True) is False:
+        if policy.profile == OperatingProfile.GUIDED:
+            verdict = VerdictOutcome.REQUIRE_APPROVAL
+        else:
+            verdict = VerdictOutcome.BLOCK
+        err_msg = (
+            ", ".join(baseline_snapshot.observation_errors)
+            if baseline_snapshot.observation_errors
+            else "baseline repository snapshot is incomplete"
+        )
+        reasons.append(f"Incomplete baseline repository snapshot: {err_msg}")
+
     if getattr(current_snapshot, "complete", True) is False:
         if policy.profile == OperatingProfile.GUIDED:
             verdict = VerdictOutcome.REQUIRE_APPROVAL

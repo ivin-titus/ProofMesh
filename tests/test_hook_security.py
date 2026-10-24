@@ -637,3 +637,123 @@ def test_explicit_budget_exhausted_flag():
     assert resp.decision == "allow"
     assert resp.is_continued is False
     assert "Retry budget exhausted" in resp.reason
+
+
+def test_antigravity_stop_missing_baseline_fails_closed(workspace_env):
+    """Test handle_stop fails closed when baseline snapshot is missing from store, without falling back to current."""
+    env = workspace_env
+    missing_baseline_id = "sha256:" + "f" * 64
+    session = env["session"].model_copy(update={
+        "session_id": "sess-missing-baseline",
+        "baseline_snapshot_id": missing_baseline_id,
+    })
+    env["store"].save_session(session)
+
+    adapter = AntigravityAdapter(
+        store=env["store"],
+        policy=env["policy"],
+        repo_root=env["repo_root"],
+        project_id="sec-project",
+        hooks_enabled=True,
+    )
+
+    payload = StopPayload(conversationId=session.session_id, fullyIdle=True)
+    resp = adapter.handle_stop(payload)
+
+    assert resp.decision == "continue"
+    assert resp.is_continued is True
+    assert "Baseline repository snapshot" in resp.reason
+    assert "not found" in resp.reason
+
+
+def test_antigravity_stop_incomplete_baseline_fails_closed(workspace_env):
+    """Test handle_stop fails closed when baseline snapshot was incomplete."""
+    env = workspace_env
+    from proofmesh.models import RepoSnapshot
+    incomplete_id = "sha256:" + "e" * 64
+    incomplete_snap = RepoSnapshot(
+        snapshot_id=incomplete_id,
+        repo_root=str(env["repo_root"]),
+        git_commit="abcdef0123456789",
+        git_dirty=False,
+        files=(),
+        captured_at=datetime.now(timezone.utc),
+        complete=False,
+        observation_errors=("Unreadable baseline directory",),
+    )
+    env["store"].save_snapshot(incomplete_snap)
+
+    session = env["session"].model_copy(update={
+        "session_id": "sess-incomplete-baseline",
+        "baseline_snapshot_id": incomplete_id,
+    })
+    env["store"].save_session(session)
+
+    adapter = AntigravityAdapter(
+        store=env["store"],
+        policy=env["policy"],
+        repo_root=env["repo_root"],
+        project_id="sec-project",
+        hooks_enabled=True,
+    )
+
+    payload = StopPayload(conversationId=session.session_id, fullyIdle=True)
+    resp = adapter.handle_stop(payload)
+
+    assert resp.decision == "continue"
+    assert resp.is_continued is True
+    assert "Incomplete baseline repository snapshot" in resp.reason
+    assert "Unreadable baseline directory" in resp.reason
+
+
+def test_antigravity_stop_policy_digest_mismatch_fails_closed(workspace_env):
+    """Test handle_stop fails closed when session policy digest does not match adapter trusted policy digest."""
+    env = workspace_env
+    session = env["session"].model_copy(update={"policy_digest": "sha256:" + "d" * 64})
+    env["store"].save_session(session)
+
+    adapter = AntigravityAdapter(
+        store=env["store"],
+        policy=env["policy"],
+        repo_root=env["repo_root"],
+        project_id="sec-project",
+        hooks_enabled=True,
+    )
+
+    payload = StopPayload(conversationId=session.session_id, fullyIdle=True)
+    resp = adapter.handle_stop(payload)
+
+    assert resp.decision == "continue"
+    assert resp.is_continued is True
+    assert "Policy digest mismatch" in resp.reason
+
+
+def test_antigravity_adapter_resolves_trusted_policy_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Test AntigravityAdapter resolves trusted policy via resolve_trusted_policy and respects PROOFMESH_POLICY."""
+    custom_policy_content = """schema_version = 1
+profile = "guided"
+
+[budget]
+max_retries = 5
+max_continuation_steps = 15
+
+[scope]
+default_allow_paths = ["custom/**"]
+default_restricted_paths = [".git/**"]
+
+[gates.custom_gate]
+provider = "pytest"
+command = ["pytest", "custom"]
+timeout_seconds = 20
+mandatory = true
+"""
+    custom_policy_file = tmp_path / "custom_policy.toml"
+    custom_policy_file.write_text(custom_policy_content, encoding="utf-8")
+    monkeypatch.setenv("PROOFMESH_POLICY", str(custom_policy_file))
+    db_file = tmp_path / "default.db"
+
+    adapter = AntigravityAdapter(store=ProofMeshStore(db_file))
+    assert adapter.policy.profile == OperatingProfile.GUIDED
+    assert adapter.policy.budget.max_retries == 5
+    assert "custom_gate" in adapter.policy.gates
+    assert adapter.policy_digest.startswith("sha256:")

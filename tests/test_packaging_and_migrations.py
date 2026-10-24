@@ -74,6 +74,9 @@ def test_wheel_contains_migration_sql_and_default_policy():
         assert "proofmesh/storage/migrations/001_init.sql" in namelist, (
             f"001_init.sql missing from wheel: {namelist}"
         )
+        assert "proofmesh/storage/migrations/002_snapshot_observation_and_loop_attempts.sql" in namelist, (
+            f"002_snapshot_observation_and_loop_attempts.sql missing from wheel: {namelist}"
+        )
         assert "proofmesh/resources/default-policy.toml" in namelist, (
             f"default-policy.toml missing from wheel: {namelist}"
         )
@@ -101,11 +104,12 @@ import sqlite3
 store = ProofMeshStore(r'{db_file}')
 conn = sqlite3.connect(r'{db_file}')
 version = conn.execute("PRAGMA user_version;").fetchone()[0]
-assert version == 1, f"Expected version 1, got {{version}}"
+assert version == 2, f"Expected version 2, got {{version}}"
 
 # Verify table created
 tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table';").fetchall()]
 assert "task_revisions" in tables
+assert "evidence" in tables
 print("INSTALLED_WHEEL_MIGRATION_SUCCESS")
 """
     python_bin = sys.executable
