@@ -42,18 +42,7 @@ from proofmesh.storage.store import ProofMeshStore
 
 def _is_snapshot_fresh(evidence_snapshot: str, current_snapshot_id: str) -> bool:
     """Check if evidence snapshot matches the current repository snapshot."""
-    if evidence_snapshot == current_snapshot_id:
-        return True
-    if current_snapshot_id.startswith("sha256:"):
-        hex_part = current_snapshot_id[7:]
-        candidates = {
-            f"snap-{hex_part}"[:63],
-            hex_part[:63],
-            current_snapshot_id.replace(":", "-")[:63],
-        }
-        if evidence_snapshot in candidates:
-            return True
-    return False
+    return evidence_snapshot == current_snapshot_id
 
 
 def create_mcp_server(
@@ -269,12 +258,24 @@ def create_mcp_server(
         # Retrieve baseline snapshot
         baseline = effective_store.get_snapshot(sess.baseline_snapshot_id)
         if baseline is None:
-            baseline = capture_snapshot(root)
-            effective_store.save_snapshot(baseline)
+            return {
+                "error": f"Missing baseline snapshot: '{sess.baseline_snapshot_id}'",
+                "status": "error",
+            }
+        if not baseline.complete:
+            return {
+                "error": f"Baseline repository snapshot observation is incomplete: {list(baseline.observation_errors)}",
+                "status": "error",
+            }
 
         # Capture and save current snapshot
         current = capture_snapshot(root)
         effective_store.save_snapshot(current)
+        if not current.complete:
+            return {
+                "error": f"Current repository snapshot observation is incomplete: {list(current.observation_errors)}",
+                "status": "error",
+            }
 
         # Load task revision for active scope rules
         task_rev = effective_store.get_task_revision(sess.task_id, sess.contract_revision)
@@ -437,6 +438,22 @@ def create_mcp_server(
                 "has_scope_violations": False,
                 "total_changed_files": 0,
             }
+        if not getattr(baseline, "complete", True):
+            obs_reasons = [
+                f"Incomplete baseline repository observation: {err}"
+                for err in getattr(baseline, "observation_errors", ())
+            ] or ["Baseline repository observation incomplete"]
+            return {
+                "session_id": sess.session_id,
+                "task_id": sess.task_id,
+                "contract_revision": sess.contract_revision,
+                "verdict": VerdictOutcome.BLOCK.value,
+                "enforcement_level": sess.integration_status.value,
+                "reasons": obs_reasons,
+                "evidence_ids": [],
+                "has_scope_violations": False,
+                "total_changed_files": 0,
+            }
 
         current = capture_snapshot(root)
         effective_store.save_snapshot(current)
@@ -539,7 +556,7 @@ def create_mcp_server(
                 "error": f"Task revision not found for {sess.task_id} rev {sess.contract_revision}"
             }
 
-        # 3. Validate baseline snapshot exists
+        # 3. Validate baseline snapshot exists and is complete
         baseline = effective_store.get_snapshot(sess.baseline_snapshot_id)
         if baseline is None:
             blocked_sess = Session(
@@ -562,6 +579,32 @@ def create_mcp_server(
                 "verdict": VerdictOutcome.BLOCK.value,
                 "message": f"Completion claim rejected: baseline snapshot '{sess.baseline_snapshot_id}' does not exist in store.",
                 "reasons": [f"Missing baseline snapshot: '{sess.baseline_snapshot_id}'"],
+            }
+        if not getattr(baseline, "complete", True):
+            obs_reasons = [
+                f"Incomplete baseline repository observation: {err}"
+                for err in getattr(baseline, "observation_errors", ())
+            ] or ["Baseline repository observation incomplete"]
+            blocked_sess = Session(
+                session_id=sess.session_id,
+                task_id=sess.task_id,
+                contract_revision=sess.contract_revision,
+                repo_root=sess.repo_root,
+                baseline_snapshot_id=sess.baseline_snapshot_id,
+                current_snapshot_id=sess.current_snapshot_id,
+                profile=sess.profile,
+                policy_digest=sess.policy_digest,
+                integration_status=sess.integration_status,
+                state=SessionState.BLOCKED,
+                started_at=sess.started_at,
+                ended_at=sess.ended_at,
+            )
+            effective_store.save_session(blocked_sess)
+            return {
+                "status": "BLOCKED",
+                "verdict": VerdictOutcome.BLOCK.value,
+                "message": "Completion claim rejected: baseline repository snapshot observation is incomplete.",
+                "reasons": obs_reasons,
             }
 
         # 4. Capture current snapshot and validate observation is complete
@@ -697,7 +740,9 @@ def create_mcp_server(
             return f"Error: Task revision not found for {sess.task_id} rev {sess.contract_revision}"
 
         current = capture_snapshot(root)
-        baseline = effective_store.get_snapshot(sess.baseline_snapshot_id) or current
+        baseline = effective_store.get_snapshot(sess.baseline_snapshot_id)
+        if baseline is None:
+            return f"## ProofMesh Session Handoff\n\n❌ **ERROR**: Baseline snapshot `{sess.baseline_snapshot_id}` does not exist in store.\n\nPlease initialize a valid baseline before requesting handoff."
         scope_result = analyze_scope(baseline, current, task_rev.scope)
         evidence_records = effective_store.list_evidence_for_session(sess.session_id)
 

@@ -616,3 +616,162 @@ async def test_session_resolution_disambiguation(tmp_path: Path):
     assert "does not match effective root" in str(exc_info.value) or (
         exc_info.value.__cause__ and "does not match effective root" in str(exc_info.value.__cause__)
     )
+
+
+@pytest.mark.anyio
+async def test_inspect_changes_and_handoff_missing_baseline_never_substituted(tmp_path: Path):
+    """Verify missing baseline snapshot is never reconstructed or substituted in inspect_changes or get_handoff."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "src").mkdir()
+    (repo / "src" / "code.py").write_text("print(1)\n")
+
+    db_path = tmp_path / "test.db"
+    store = ProofMeshStore(db_path)
+    store.create_project("p1", root_path=str(repo))
+
+    task_rev = TaskRevision(
+        task_id="t1",
+        revision=1,
+        parent_revision=None,
+        summary="Test task",
+        risk_level=RiskLevel.LOW,
+        approval_status=ApprovalStatus.APPROVED,
+        approved_by="tester",
+        approved_at=datetime.now(timezone.utc),
+        contract_digest="sha256:" + "a" * 64,
+        scope=ScopePolicy(allow_paths=("src/**",), restricted_paths=()),
+        required_gates=(),
+        acceptance_criteria=(),
+        constraints=(),
+        raw_markdown="# Task",
+    )
+    store.save_task_revision(task_rev, project_id="p1")
+
+    policy, policy_digest = resolve_trusted_policy()
+    missing_baseline_id = "sha256:" + "f" * 64
+    session = Session(
+        session_id="sess-missing-base",
+        task_id="t1",
+        contract_revision=1,
+        repo_root=str(repo),
+        baseline_snapshot_id=missing_baseline_id,
+        current_snapshot_id=None,
+        profile=OperatingProfile.FLOW,
+        policy_digest=policy_digest,
+        integration_status=IntegrationStatus.UNGUARDED,
+        state=SessionState.ACTIVE,
+        started_at=datetime.now(timezone.utc),
+    )
+    store.save_session(session)
+
+    server = create_mcp_server(
+        store=store,
+        repo_root=repo,
+        project_id="p1",
+        policy=policy,
+        policy_digest=policy_digest,
+    )
+
+    # 1. inspect_changes must return error and NOT save missing_baseline_id to store
+    inspect_res = await server.call_tool("inspect_changes", arguments={"session_id": "sess-missing-base"})
+    data = _extract_data(inspect_res)
+    assert "Missing baseline snapshot" in str(data)
+    assert store.get_snapshot(missing_baseline_id) is None
+
+    # 2. get_handoff must return error markdown indicating missing baseline
+    handoff_res = await server.call_tool("get_handoff", arguments={"session_id": "sess-missing-base"})
+    handoff_text = handoff_res.content[0].text
+    assert "Baseline snapshot" in handoff_text
+    assert "does not exist in store" in handoff_text
+
+
+@pytest.mark.anyio
+async def test_incomplete_baseline_fails_closed_in_all_mcp_tools(tmp_path: Path):
+    """Verify incomplete baseline snapshot causes inspect_changes, get_status, and claim_completion to fail closed."""
+    from proofmesh.models import RepoSnapshot
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "src").mkdir()
+    (repo / "src" / "code.py").write_text("print(1)\n")
+
+    db_path = tmp_path / "test_incomplete.db"
+    store = ProofMeshStore(db_path)
+    store.create_project("p1", root_path=str(repo))
+
+    task_rev = TaskRevision(
+        task_id="t1",
+        revision=1,
+        parent_revision=None,
+        summary="Test task",
+        risk_level=RiskLevel.LOW,
+        approval_status=ApprovalStatus.APPROVED,
+        approved_by="tester",
+        approved_at=datetime.now(timezone.utc),
+        contract_digest="sha256:" + "a" * 64,
+        scope=ScopePolicy(allow_paths=("src/**",), restricted_paths=()),
+        required_gates=(),
+        acceptance_criteria=(),
+        constraints=(),
+        raw_markdown="# Task",
+    )
+    store.save_task_revision(task_rev, project_id="p1")
+
+    # Incomplete baseline snapshot
+    inc_baseline_id = "sha256:" + "e" * 64
+    inc_baseline = RepoSnapshot(
+        snapshot_id=inc_baseline_id,
+        repo_root=str(repo),
+        git_commit=None,
+        git_dirty=False,
+        files=(),
+        captured_at=datetime.now(timezone.utc),
+        complete=False,
+        observation_errors=("Broken symlink in baseline: broken.txt",),
+    )
+    store.save_snapshot(inc_baseline)
+
+    policy, policy_digest = resolve_trusted_policy()
+    session = Session(
+        session_id="sess-inc-base",
+        task_id="t1",
+        contract_revision=1,
+        repo_root=str(repo),
+        baseline_snapshot_id=inc_baseline_id,
+        current_snapshot_id=None,
+        profile=OperatingProfile.FLOW,
+        policy_digest=policy_digest,
+        integration_status=IntegrationStatus.UNGUARDED,
+        state=SessionState.ACTIVE,
+        started_at=datetime.now(timezone.utc),
+    )
+    store.save_session(session)
+
+    server = create_mcp_server(
+        store=store,
+        repo_root=repo,
+        project_id="p1",
+        policy=policy,
+        policy_digest=policy_digest,
+    )
+
+    # 1. inspect_changes rejects incomplete baseline
+    res_inspect = await server.call_tool("inspect_changes", arguments={"session_id": "sess-inc-base"})
+    data_inspect = _extract_data(res_inspect)
+    assert "incomplete" in str(data_inspect).lower()
+
+    # 2. get_status rejects incomplete baseline
+    res_status = await server.call_tool("get_status", arguments={"session_id": "sess-inc-base"})
+    data_status = _extract_data(res_status)
+    assert data_status["verdict"].lower() == "block"
+    assert any("incomplete" in r.lower() for r in data_status["reasons"])
+
+    # 3. claim_completion rejects incomplete baseline and does NOT accept
+    res_claim = await server.call_tool("claim_completion", arguments={"session_id": "sess-inc-base"})
+    data_claim = _extract_data(res_claim)
+    assert data_claim["status"] == "BLOCKED"
+    assert data_claim["verdict"].lower() == "block"
+    reloaded_sess = store.get_session("sess-inc-base")
+    assert reloaded_sess.state != SessionState.ACCEPTED
+
