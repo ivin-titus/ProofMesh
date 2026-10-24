@@ -1,0 +1,12 @@
+{
+  "protocol_version": "2025-11-25",
+  "capabilities": {
+    "tools": {
+      "list_changed": false
+    }
+  },
+  "server_info": {
+    "name": "proofmesh-spike",
+    "version": ""
+  }
+}

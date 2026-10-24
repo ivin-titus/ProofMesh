@@ -18,11 +18,11 @@ A judge should be able to see the approved contract, what changed, why the task 
 
 ### Checkpoint 0 — Integration spike (first 25–30 minutes)
 
-- [ ] Choose the preferred available host, trying Antigravity first if already installed.
-- [ ] Verify a real MCP request/response against a trivial core operation.
-- [ ] If using a hook, capture a real hook payload and verify the exact response semantics.
-- [ ] Save the real payload as a golden fixture.
-- [ ] Decide: continue with this host, switch to another available host, or honestly demonstrate MCP/CLI as partial enforcement.
+- [x] Choose the preferred available host, trying Antigravity first if already installed.
+- [x] Verify a real MCP request/response against a trivial core operation.
+- [x] If using a hook, capture a real hook payload and verify the exact response semantics.
+- [x] Save the real payload as a golden fixture.
+- [x] Decide: continue with this host, switch to another available host, or honestly demonstrate MCP/CLI as partial enforcement.
 
 **Stop rule:** Do not build a universal installer or second adapter before this checkpoint succeeds. Never invent or assume a host's hook schema.
 

@@ -1,0 +1,20 @@
+{
+  "tools": [
+    {
+      "name": "proofmesh_ping",
+      "description": "Echo a message to verify the ProofMesh integration path.",
+      "input_schema": {
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "type": "object"
+      }
+    }
+  ]
+}

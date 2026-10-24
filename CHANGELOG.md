@@ -1,5 +1,13 @@
 # Change log
 
+## 2026-10-24T23:15:00+05:30 — Complete Checkpoint 0 integration spike for Google Antigravity
+
+- **Changed:** Performed the time-boxed Checkpoint 0 integration spike. Confirmed Google Antigravity CLI (`agy` 1.4.7) is the installed host in the environment. Created and verified a live MCP stdio server/client round-trip using the official `mcp` SDK (`initialize`, `tools/list`, and `tools/call`). Captured real sanitized lifecycle hook payloads from `agy` execution (`PreInvocation`, `PreToolUse`, `Stop`). Verified real host response semantics: `PreToolUse` returning `deny` actually halted tool execution with the custom reason presented to the agent; `Stop` returning `continue` forced execution continuation. Added sanitized golden fixtures (`tests/fixtures/host_payloads/antigravity/` and `tests/fixtures/mcp/`) and automated tests (`tests/test_integration_spike.py`).
+- **Why:** Satisfies Checkpoint 0 requirements: proves the integration path on a real installed host with real hook and MCP semantics without inventing schemas or relying on unverified assumptions.
+- **Validation:** Ran live `agy` CLI commands in print mode with active `.agents/hooks.json` interceptors; verified tool denial and stop continuation; ran `pytest tests/test_integration_spike.py` (5 passed).
+- **Test result:** 5 passed in 0.86s via pytest.
+- **Limitations:** Only Google Antigravity and stdio MCP have been tested and verified; other hosts (Codex, Claude Code, OpenCode, Devin) remain unverified roadmap adapters.
+
 ## 2026-10-24T22:37:08+05:30 — Repair TRD section structure after consistency check
 
 - **Changed:** Rebuilt `docs/TRD.md` from the prior clean version and reapplied the scope reconciliation. The TRD now has one copy of each major section, a single relative-time implementation plan, and explicit MVP/future boundaries.

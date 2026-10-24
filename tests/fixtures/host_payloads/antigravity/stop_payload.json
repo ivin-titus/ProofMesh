@@ -1,0 +1,14 @@
+{
+  "artifactDirectoryPath": "/path/to/artifacts/brain/f1e8bbd5-9063-4b66-beee-9178a499fc97",
+  "conversationId": "f1e8bbd5-9063-4b66-beee-9178a499fc97",
+  "error": "",
+  "executionNum": 0,
+  "fullyIdle": true,
+  "lastUserInput": "run the bash command echo blocked_command",
+  "modelName": "gemini-3.8-flash-high",
+  "terminationReason": "NO_TOOL_CALL",
+  "transcriptPath": "/path/to/artifacts/brain/f1e8bbd5-9063-4b66-beee-9178a499fc97/.system_generated/logs/transcript_full.jsonl",
+  "workspacePaths": [
+    "/workspace/ProofMesh"
+  ]
+}

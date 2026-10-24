@@ -1,0 +1,12 @@
+{
+  "artifactDirectoryPath": "/path/to/artifacts/brain/34cedfce-9a25-4828-b0e9-91c7963e05d2",
+  "conversationId": "34cedfce-9a25-4828-b0e9-91c7963e05d2",
+  "initialNumSteps": 1,
+  "invocationNum": 0,
+  "lastUserInput": "respond with OK",
+  "modelName": "gemini-3.8-flash-high",
+  "transcriptPath": "/path/to/artifacts/brain/34cedfce-9a25-4828-b0e9-91c7963e05d2/.system_generated/logs/transcript_full.jsonl",
+  "workspacePaths": [
+    "/workspace/ProofMesh"
+  ]
+}
