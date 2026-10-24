@@ -202,3 +202,47 @@ Evidence is only eligible for evaluation if:
 - Once retries reach `budget.max_retries`:
   - `LoopDetector.is_budget_exhausted()` returns `True`.
   - Stop hook allows host termination (`allow`) to prevent infinite model loops, but ProofMesh retains `VerdictOutcome.BLOCK` with handoff explaining budget exhaustion.
+
+---
+
+## 6. Final Correctness & Security Closure Contracts (Checkpoint 10)
+
+### 6.1 Repository Snapshot Completeness & Error Recording (Agent A)
+- **Completeness Invariant**: If any repository file or directory cannot be safely or completely observed (e.g., directory walk `onerror`, unreadable files due to permissions, broken symlinks whose target is unresolvable, symlinks escaping the workspace root), `RepoSnapshot.complete` MUST be set to `False`.
+- **Observation Errors**: `observation_errors` must contain bounded, actionable error descriptions (capped to prevent memory exhaustion).
+- **Graceful Git Independence**: Expected non-Git repositories (where `git rev-parse` fails) are not snapshot observation failures (`git_commit=None`, `git_dirty=False`).
+- **Deterministic Snapshot IDs**: Snapshot IDs are always strictly computed via SHA-256 over observed sorted files, ensuring deterministic identifiers regardless of completeness.
+- **Fail-Closed Evaluator Behavior**: An incomplete snapshot (`complete=False`) must cause evaluation and completion claims to return `VerdictOutcome.BLOCK`.
+
+### 6.2 MCP Invariant Consistency & Missing Baseline Handling (Agent B)
+- **Zero Baseline Reconstruction**: Missing baseline snapshots must NEVER be silently reconstructed or substituted with current snapshots in `inspect_changes`, `get_status`, `claim_completion`, or `get_handoff`.
+- **Explicit Invariant Checking**: Both baseline and current snapshots must exist in store and have `complete=True`.
+- **Strict Evidence Matching**: Evidence must exactly match session ID, contract revision, current gate config digest, and exact snapshot ID (`evidence.snapshot_after == current.snapshot_id`). Fuzzy matching and test shortcuts are prohibited.
+- **Fail-Closed Completion**: If any invariant fails in `claim_completion`, the session MUST NOT transition to `SessionState.ACCEPTED` and no approval verdict may be recorded.
+- **Clean JSON-RPC Stdio**: All diagnostic logging must go to `sys.stderr`, keeping `sys.stdout` purely for JSON-RPC frames.
+
+### 6.3 Truthful Integration Status & Strict Policy Digest Pinning (Agent C)
+- **Truthful Status Definition**:
+  - `IntegrationStatus.UNGUARDED`: Default for new sessions, CLI-created sessions, and seeded demos. Indicates no verified live host hook or MCP integration is enforcing gates.
+  - `IntegrationStatus.PARTIAL`: Either lifecycle hooks OR MCP connection is verified active, but not both.
+  - `IntegrationStatus.ENFORCED`: Both lifecycle hooks AND MCP connection are verified active and enforced for the current host interaction.
+- **No Inferred Enforcement from Storage**: Adapters must not trust a stored `ENFORCED` string as proof that the current live interaction has active hooks/MCP.
+- **Policy Digest Pinning**: Sessions must pin the canonical policy digest computed via `compute_policy_digest()`. If effective trusted policy differs from pinned session policy digest, operations must reject the mismatch.
+
+### 6.4 Demo Fixture Safety & Database Project Protection (Agent D)
+- **Path Ownership Invariant**: The seeded demo refuses to run in any directory unless `.proofmesh-fixture` is present AND existing files (`src/math_service.py`, `tests/test_math.py`, `pytest.ini`, `config/security.toml`) match known demo content or prior demo runs. Foreign pre-existing files are never overwritten.
+- **Scoped Temporary File Removal**: Cleanup only removes known demo report files and `config/security.toml`. Before unlinking `config/security.toml`, its content must match the expected violation config.
+- **Database Safety**: Seeded demo validates that caller-provided databases contain only the demo project ID and known demo project name/tasks. Collisions with unrelated projects or foreign tables are refused without altering caller state.
+- **Preserved Artifacts**: Both `report-blocked.md` / `report-blocked.json` and `report.md` / `report.json` remain available after execution.
+
+### 6.5 UI Workspace Scoping, HTML Sanitization & Receipt Determinism (Agent E)
+- **Workspace Scoping**: Dashboard queries must strictly filter sessions by `repo_root` (canonical resolved path). When no session ID is provided, the UI selects the most recent session for the current workspace, not the globally newest session in the database.
+- **Foreign Session Rejection**: Explicitly requested sessions belonging to a different `repo_root` must be rejected with 404 / `None`.
+- **Strict Read-Only Semantics**: HTTP GET requests must never evaluate verdicts, mutate session states, run verification gates, or execute database writes. Mutating HTTP verbs (POST, PUT, DELETE) return 405.
+- **HTML Sanitization**: All untrusted fields rendered in HTML (task summaries, path changes, reasons, criteria, gate IDs) must be sanitized with `html.escape()`.
+- **Receipt Determinism**: Receipt digest for an unevaluated session must be computed over deterministic state, distinguishing export metadata from state integrity.
+
+### 6.6 Canonical Digest Validation & Removal of Legacy Exceptions (Main Integrator)
+- All production code in `evaluator.py`, `mcp_server.py`, and `report.py` must enforce strict `sha256:` digest equality without bypasses or mock placeholder shortcuts.
+- Tests must use realistic, canonical models and digests.
+
