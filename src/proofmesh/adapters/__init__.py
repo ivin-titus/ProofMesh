@@ -24,7 +24,14 @@ from proofmesh.adapters.hook_protocol import (
     extract_target_file,
     parse_hook_payload,
 )
-from proofmesh.adapters.mcp_server import create_mcp_server, run_stdio_server
+
+
+def __getattr__(name: str):
+    if name in ("create_mcp_server", "run_stdio_server"):
+        from proofmesh.adapters import mcp_server
+        return getattr(mcp_server, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "AntigravityAdapter",

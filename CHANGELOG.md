@@ -1,5 +1,37 @@
 # Change log
 
+## 2026-10-25T03:15:00+05:30 — Stabilization, Security Repair, and PRD Conformance Milestone
+
+- **Changed:** Performed comprehensive security remediation, data safety enforcement, and end-to-end PRD conformance hardening across the shared core, adapters, and demo:
+  1. **Safe Deterministic Demo & 10-Phase Recovery (`proofmesh.demo`)**:
+     - Eliminated all destructive file deletions and database wipes; added `.proofmesh-fixture` marker requirement and refusal logic that protects caller repositories and databases from modification.
+     - Completed full 10-phase recovery loop: Intent → Baseline → Scope violation/BLOCK → Clean Correction → Verification/Fresh Evidence → ALLOW → Tamper-evident receipt (`report.md`, `report.json`), while preserving blocked evidence (`report-blocked.md`, `report-blocked.json`). Verified cleanly repeatable twice on the same target directory.
+  2. **Shared Foundation & Trusted Policy Pinning (`proofmesh.config`, `proofmesh.storage`)**:
+     - Implemented `resolve_trusted_policy()` and `compute_policy_digest(policy)`, computing deterministic SHA-256 digests.
+     - Eliminated untrusted workspace `policy.toml` injection and gate demotion in `cli.py` and adapters.
+     - Hardened SQLite schema with migration `002_snapshot_observation_and_loop_attempts.sql`, tracking snapshot observation completeness, errors, and persistent failure loop attempts across process restarts.
+     - Enforced project/repo scoping on `store.get_session()` and `store.get_active_session_for_project()`, preventing cross-workspace session leakage.
+  3. **Verification Runner & Evaluator Hardening (`proofmesh.core.verification`, `evaluator`)**:
+     - Subprocess runner bounded to 64KB memory stream drainer and 2000-char summaries; kills timed-out child processes. Automatically captures before/after snapshots; invalidates evidence if workspace state mutates during check execution.
+     - Evaluator fails closed on incomplete snapshot observation, policy digest mismatch, or obsolete gate configuration digests. Strictly filters evidence by session ID and contract revision.
+  4. **Hook Path Safety & Honest Enforcement (`proofmesh.adapters.hook_protocol`, `antigravity.py`)**:
+     - Strict path normalization rejecting directory traversal (`..`), NUL bytes, Windows drive-qualified / UNC paths, and symlink escapes outside the workspace.
+     - Denies write tools with missing, empty, or unrecognized target path arguments.
+     - Intercepts destructive commands (`git reset --hard`, `git clean`, `rm -rf`) and restricted path targeting without fake sentinels.
+     - Integrated `LoopDetector` retry budget exhaustion in `evaluate_stop` to halt continuation with verdict BLOCK when retries run out. Defaults integration status honestly to `UNGUARDED` until active enforcement is verified.
+  5. **MCP Server Entrypoint & Invariants (`proofmesh.adapters.mcp_server`)**:
+     - Added `if __name__ == "__main__":` entrypoint with CLI argument parsing; reserved `sys.stdout` exclusively for JSON-RPC framing with diagnostics routed to `sys.stderr`.
+     - Hardened `claim_completion`: enforces baseline existence, snapshot observation completeness, policy digest matching, and fresh PASS evidence for all mandatory gates before transitioning to `ACCEPTED`.
+  6. **Task Revision & Approval Integrity (`proofmesh.core.task_service`)**:
+     - Strips untrusted self-approval front-matter keys (`approval_status`, `approved_by`, `approved_at`).
+     - Enforces linear revision increments (`N + 1`), rejects initial proposals with parent revisions, prevents duplicate proposals, validates allowlisted gates, and guarantees atomic database approvals.
+  7. **Read-Only UI Dashboard Hardening (`proofmesh.ui`)**:
+     - Strictly read-only GET requests: no database mutations or evaluations triggered on GET; unevaluated sessions return `verdict: null` with deterministic digest. Rejects mutating HTTP verbs with 405 Method Not Allowed. Restricts binding exclusively to localhost/127.0.0.1.
+- **Why:** Satisfies PRD, TRD §0 scope lock and §20 definition of done, transforming ProofMesh into a secure, demonstrable, production-quality control layer.
+- **Validation:** Executed full test suite of 231 automated tests under target CPython 3.14.9 (`.venv314`, 231/231 passed in 17.51s) and 176 tests under host Python 3.12.3 (`.venv`, 176/176 passed in 14.60s). Verified MCP stdio subprocess smoke test, CLI demo run twice consecutively, and verified read-only dashboard.
+- **Test result:** 231 passed in 17.51s on CPython 3.14.9; 176 passed in 14.60s on Python 3.12.3.
+- **Limitations:** None for MVP boundary. Multi-tenant remote persistence and cloud AI advisors remain deferred to future roadmap.
+
 ## 2026-10-25T01:46:00+05:30 — Complete Checkpoint 8: Presentation and Local Status Panel (`proofmesh ui`)
 
 - **Changed:** Implemented minimal, read-only local web status dashboard and JSON API (`src/proofmesh/ui.py`) and wired `proofmesh ui` CLI subcommand:

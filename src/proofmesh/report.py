@@ -50,11 +50,11 @@ def render_markdown_report(
 
     # Verdict Badge
     if verdict.verdict == VerdictOutcome.ALLOW:
-        verdict_badge = "✅ ALLOW"
+        verdict_badge = "✅ ALLOW (ACCEPTED)"
     elif verdict.verdict == VerdictOutcome.BLOCK:
-        verdict_badge = "❌ BLOCK"
+        verdict_badge = "❌ BLOCK (BLOCKED)"
     elif verdict.verdict == VerdictOutcome.REQUIRE_APPROVAL:
-        verdict_badge = "⚠️ REQUIRE_APPROVAL"
+        verdict_badge = "⚠️ REQUIRE_APPROVAL (NEEDS_APPROVAL)"
     elif verdict.verdict == VerdictOutcome.WARN:
         verdict_badge = "⚠️ WARN"
     else:
@@ -204,6 +204,8 @@ def export_json_receipt(
         "schema_version": "1.0",
         "receipt_id": f"rcpt-{uuid.uuid4().hex[:12]}",
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "digest_type": "integrity_checksum",
+        "digest_description": "Unkeyed SHA-256 integrity digest over canonical JSON fields. Not an identity digital signature.",
         "session": session.model_dump(mode="json"),
         "task": task.model_dump(mode="json"),
         "snapshot": {

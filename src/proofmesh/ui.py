@@ -8,6 +8,7 @@ Renders the exact same validated data as the CLI and canonical receipts.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import hashlib
 import html
 import http.server
 import json
@@ -16,18 +17,14 @@ from pathlib import Path
 import sys
 import threading
 from typing import Any, Sequence
+import uuid
 
-from proofmesh.config import get_default_policy
-from proofmesh.core.evaluator import _is_snapshot_fresh, evaluate_session
-from proofmesh.core.handoff import generate_handoff
-from proofmesh.core.repo_snapshot import capture_snapshot
 from proofmesh.core.scope_analyzer import analyze_scope
 from proofmesh.models import (
     EvidenceStatus,
     VerdictOutcome,
 )
 from proofmesh.report import export_json_receipt
-from proofmesh.storage.paths import get_project_db_path
 from proofmesh.storage.store import ProofMeshStore
 
 
@@ -36,7 +33,11 @@ def get_receipt_for_session(
     session_id: str | None = None,
     repo_root: Path | None = None,
 ) -> dict[str, Any] | None:
-    """Retrieve or compute the current canonical receipt for a session."""
+    """Retrieve the current canonical receipt for a session without modifying state.
+
+    Never calculates or persists new verdicts, never executes live verification checks,
+    and never modifies database tables.
+    """
     effective_repo_root = repo_root or Path.cwd()
 
     # Resolve session
@@ -72,26 +73,38 @@ def get_receipt_for_session(
 
     if verdicts:
         verdict = verdicts[-1]
-    else:
-        policy = get_default_policy()
-        verdict = evaluate_session(
+        return export_json_receipt(
             session=session,
-            task_revision=task_revision,
-            current_snapshot=current_snapshot,
-            evidence_records=evidence_records,
+            task=task_revision,
+            snapshot=current_snapshot,
             scope_result=scope_result,
-            policy=policy,
+            evidence=evidence_records,
+            verdict=verdict,
         )
-        store.save_verdict(verdict)
 
-    return export_json_receipt(
-        session=session,
-        task=task_revision,
-        snapshot=current_snapshot,
-        scope_result=scope_result,
-        evidence=evidence_records,
-        verdict=verdict,
-    )
+    # If no verdict has been evaluated/saved yet, return unevaluated receipt representation
+    receipt: dict[str, Any] = {
+        "schema_version": "1.0",
+        "receipt_id": f"rcpt-{uuid.uuid4().hex[:12]}",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "session": session.model_dump(mode="json"),
+        "task": task_revision.model_dump(mode="json"),
+        "snapshot": {
+            "snapshot_id": current_snapshot.snapshot_id,
+            "repo_root": current_snapshot.repo_root,
+            "git_commit": current_snapshot.git_commit,
+            "git_dirty": current_snapshot.git_dirty,
+            "captured_at": current_snapshot.captured_at.isoformat(),
+            "file_count": len(current_snapshot.files),
+            "files": [f.model_dump(mode="json") for f in current_snapshot.files],
+        },
+        "scope": scope_result.model_dump(mode="json"),
+        "evidence": [e.model_dump(mode="json") for e in evidence_records],
+        "verdict": None,
+    }
+    canonical_repr = json.dumps(receipt, sort_keys=True, separators=(",", ":"))
+    receipt["receipt_digest"] = f"sha256:{hashlib.sha256(canonical_repr.encode('utf-8')).hexdigest()}"
+    return receipt
 
 
 def render_dashboard_html(receipt: dict[str, Any] | None) -> str:
@@ -116,48 +129,81 @@ def render_dashboard_html(receipt: dict[str, Any] | None) -> str:
 </body>
 </html>"""
 
-    verdict_data = receipt.get("verdict", {})
-    verdict_outcome = verdict_data.get("verdict", "UNKNOWN").upper()
-    enforcement = verdict_data.get("enforcement_level", "unknown")
-    task_data = receipt.get("task", {})
-    scope_data = receipt.get("scope", {})
-    evidence_list = receipt.get("evidence", [])
-    snapshot_data = receipt.get("snapshot", {})
-    reasons = verdict_data.get("reasons", [])
+    session_data = receipt.get("session") or {}
+    task_data = receipt.get("task") or {}
+    scope_data = receipt.get("scope") or {}
+    evidence_list = receipt.get("evidence") or []
+    snapshot_data = receipt.get("snapshot") or {}
+    verdict_data = receipt.get("verdict")
 
-    if verdict_outcome == "ALLOW":
-        badge_class = "badge-allow"
-        badge_text = "✅ ALLOW"
-    elif verdict_outcome == "BLOCK":
-        badge_class = "badge-block"
-        badge_text = "❌ BLOCK"
-    elif verdict_outcome == "REQUIRE_APPROVAL":
-        badge_class = "badge-warn"
-        badge_text = "⚠️ REQUIRE_APPROVAL"
-    else:
+    snapshot_captured_at = html.escape(str(snapshot_data.get("captured_at") or "unknown"))
+
+    if verdict_data is None:
+        verdict_outcome = "UNEVALUATED"
+        enforcement = "n/a"
         badge_class = "badge-neutral"
-        badge_text = f"❓ {verdict_outcome}"
+        badge_text = "⏳ Unevaluated"
+        pill_class = "pill-neutral"
+        verdict_display = "Unevaluated"
+        evaluated_at_text = "Unevaluated (no evaluation recorded)"
+        reasons_html = "<p>No evaluation recorded yet</p>"
+    else:
+        verdict_outcome = str(verdict_data.get("verdict", "UNKNOWN")).upper()
+        enforcement = str(verdict_data.get("enforcement_level", "unknown"))
+        evaluated_at_raw = verdict_data.get("evaluated_at")
+        evaluated_at_text = (
+            html.escape(str(evaluated_at_raw)) if evaluated_at_raw else "Unevaluated"
+        )
+        reasons = verdict_data.get("reasons") or []
+        reason_items = [f"<li>{html.escape(str(r))}</li>" for r in reasons]
+        reasons_html = "<ul>" + "".join(reason_items) + "</ul>" if reason_items else "<p>None</p>"
+
+        if verdict_outcome == "ALLOW":
+            badge_class = "badge-allow"
+            badge_text = "✅ ALLOW"
+            pill_class = "pill-allow"
+            verdict_display = "ALLOW"
+        elif verdict_outcome == "BLOCK":
+            badge_class = "badge-block"
+            badge_text = "❌ BLOCK"
+            pill_class = "pill-block"
+            verdict_display = "BLOCK"
+        elif verdict_outcome == "REQUIRE_APPROVAL":
+            badge_class = "badge-warn"
+            badge_text = "⚠️ REQUIRE_APPROVAL"
+            pill_class = "pill-warn"
+            verdict_display = "REQUIRE_APPROVAL"
+        elif verdict_outcome == "WARN":
+            badge_class = "badge-warn"
+            badge_text = "⚠️ WARN"
+            pill_class = "pill-warn"
+            verdict_display = "WARN"
+        else:
+            badge_class = "badge-neutral"
+            badge_text = f"❓ {html.escape(verdict_outcome)}"
+            pill_class = "pill-neutral"
+            verdict_display = html.escape(verdict_outcome)
 
     # Build scope table rows
     scope_rows = []
-    changes = scope_data.get("changes", [])
-    findings_map = {f.get("path"): f for f in scope_data.get("findings", [])}
+    changes = scope_data.get("changes") or []
+    findings_map = {f.get("path"): f for f in (scope_data.get("findings") or [])}
     for c in changes:
-        c_path = html.escape(c.get("path", ""))
-        c_type = html.escape(c.get("change_type", ""))
+        c_path = html.escape(str(c.get("path") or ""))
+        c_type = html.escape(str(c.get("change_type") or ""))
         finding = findings_map.get(c.get("path"))
         if finding is None:
             f_badge = '<span class="pill pill-neutral">Unknown</span>'
             f_reason = "No finding"
         elif finding.get("restricted"):
             f_badge = '<span class="pill pill-block">Restricted</span>'
-            f_reason = html.escape(finding.get("reason", "Restricted path"))
+            f_reason = html.escape(str(finding.get("reason") or "Restricted path"))
         elif not finding.get("allowed"):
             f_badge = '<span class="pill pill-block">Not Allowed</span>'
-            f_reason = html.escape(finding.get("reason", "Out of allow_paths"))
+            f_reason = html.escape(str(finding.get("reason") or "Out of allow_paths"))
         else:
             f_badge = '<span class="pill pill-allow">Allowed</span>'
-            f_reason = html.escape(finding.get("reason", "Allowlisted"))
+            f_reason = html.escape(str(finding.get("reason") or "Allowlisted"))
         scope_rows.append(
             f"<tr><td><code>{c_path}</code></td><td><code>{c_type}</code></td>"
             f"<td>{f_badge}</td><td>{f_reason}</td></tr>"
@@ -172,9 +218,9 @@ def render_dashboard_html(receipt: dict[str, Any] | None) -> str:
     evidence_rows = []
     current_snap_id = snapshot_data.get("snapshot_id", "")
     for e in evidence_list:
-        g_id = html.escape(e.get("gate_id", ""))
-        prov = html.escape(e.get("provider_name", ""))
-        status = e.get("status", "").upper()
+        g_id = html.escape(str(e.get("gate_id") or ""))
+        prov = html.escape(str(e.get("provider_name") or ""))
+        status = str(e.get("status") or "").upper()
         if status == "PASSED":
             st_pill = '<span class="pill pill-allow">PASSED</span>'
         elif status == "FAILED":
@@ -182,16 +228,17 @@ def render_dashboard_html(receipt: dict[str, Any] | None) -> str:
         else:
             st_pill = f'<span class="pill pill-warn">{html.escape(status)}</span>'
 
-        is_fresh = e.get("snapshot_after") == current_snap_id
+        is_fresh = bool(current_snap_id) and e.get("snapshot_after") == current_snap_id
         fr_pill = (
             '<span class="pill pill-allow">fresh</span>'
             if is_fresh
             else '<span class="pill pill-warn">stale</span>'
         )
 
-        exit_c = str(e.get("exit_code", 0))
-        dur = f"{e.get('duration_ms', 0)}ms"
-        summary = html.escape(e.get("summary", "")[:80])
+        exit_c = html.escape(str(e.get("exit_code") if e.get("exit_code") is not None else 0))
+        dur = html.escape(f"{e.get('duration_ms', 0)}ms")
+        raw_summary = str(e.get("summary") or "")[:80]
+        summary = html.escape(raw_summary)
         evidence_rows.append(
             f"<tr><td><code>{g_id}</code></td><td>{prov}</td><td>{st_pill}</td>"
             f"<td>{exit_c}</td><td>{dur}</td><td>{fr_pill}</td><td><code>{summary}</code></td></tr>"
@@ -201,10 +248,6 @@ def render_dashboard_html(receipt: dict[str, Any] | None) -> str:
         if evidence_rows
         else "<tr><td colspan='7'>No verification evidence recorded for this session.</td></tr>"
     )
-
-    # Reasons list
-    reason_items = [f"<li>{html.escape(r)}</li>" for r in reasons]
-    reasons_html = "<ul>" + "".join(reason_items) + "</ul>" if reason_items else "<p>None</p>"
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -262,7 +305,7 @@ def render_dashboard_html(receipt: dict[str, Any] | None) -> str:
     .badge-allow {{ background: var(--allow-bg); border-color: var(--allow-border); color: var(--allow-text); }}
     .badge-block {{ background: var(--block-bg); border-color: var(--block-border); color: var(--block-text); }}
     .badge-warn {{ background: var(--warn-bg); border-color: var(--warn-border); color: var(--warn-text); }}
-    .badge-neutral {{ background: #334155; color: #cbd5e1; }}
+    .badge-neutral {{ background: #334155; border-color: #64748b; color: #cbd5e1; }}
     .card {{
       background: var(--card-bg);
       border: 1px solid var(--border);
@@ -277,6 +320,15 @@ def render_dashboard_html(receipt: dict[str, Any] | None) -> str:
       border-bottom: 1px solid rgba(255, 255, 255, 0.05);
       padding-bottom: 0.5rem;
     }}
+    .evaluation-notice {{
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      font-size: 0.85rem;
+      color: #94a3b8;
+    }}
+    .evaluation-notice strong {{ color: #38bdf8; }}
     .grid-2 {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.25rem; }}
     .meta-list {{ list-style: none; display: flex; flex-direction: column; gap: 0.5rem; font-size: 0.9rem; }}
     .meta-list li strong {{ color: #cbd5e1; }}
@@ -316,7 +368,7 @@ def render_dashboard_html(receipt: dict[str, Any] | None) -> str:
     <header>
       <div>
         <h1>ProofMesh Control Layer</h1>
-        <div class="subtitle">Session: <code>{html.escape(receipt.get("session", {}).get("session_id", "unknown"))}</code> &bull; Enforcement: <code>{html.escape(enforcement)}</code></div>
+        <div class="subtitle"><strong>Last Persisted Evaluation</strong> &bull; Session: <code>{html.escape(str(session_data.get("session_id", "unknown")))}</code> &bull; Enforcement: <code>{html.escape(enforcement)}</code></div>
       </div>
       <div class="controls">
         <div class="verdict-banner {badge_class}">{badge_text}</div>
@@ -324,26 +376,33 @@ def render_dashboard_html(receipt: dict[str, Any] | None) -> str:
       </div>
     </header>
 
+    <div class="evaluation-notice">
+      <strong>Last Persisted Evaluation:</strong> Displaying stored verification verdict evaluated at <code>{evaluated_at_text}</code> for snapshot captured at <code>{snapshot_captured_at}</code>. Auto-refresh checks for newly persisted records; it does not execute live checks.
+    </div>
+
     <div class="grid-2">
       <!-- Task Contract -->
       <div class="card">
         <h2>Task Contract</h2>
         <ul class="meta-list">
-          <li><strong>Task ID:</strong> <code>{html.escape(task_data.get("task_id", ""))}</code> (Rev {task_data.get("revision", 1)})</li>
-          <li><strong>Summary:</strong> {html.escape(task_data.get("summary", ""))}</li>
-          <li><strong>Risk Level:</strong> <code>{html.escape(task_data.get("risk_level", ""))}</code></li>
-          <li><strong>Approval:</strong> <code>{html.escape(task_data.get("approval_status", ""))}</code> (by {html.escape(task_data.get("approved_by") or "n/a")})</li>
-          <li><strong>Contract Digest:</strong> <code>{html.escape(task_data.get("contract_digest", "")[:28])}...</code></li>
-          <li><strong>Snapshot ID:</strong> <code>{html.escape(snapshot_data.get("snapshot_id", "")[:28])}...</code></li>
+          <li><strong>Task ID:</strong> <code>{html.escape(str(task_data.get("task_id", "")))}</code> (Rev {html.escape(str(task_data.get("revision", 1)))})</li>
+          <li><strong>Summary:</strong> {html.escape(str(task_data.get("summary", "")))}</li>
+          <li><strong>Risk Level:</strong> <code>{html.escape(str(task_data.get("risk_level", "")))}</code></li>
+          <li><strong>Approval:</strong> <code>{html.escape(str(task_data.get("approval_status", "")))}</code> (by {html.escape(str(task_data.get("approved_by") or "n/a"))})</li>
+          <li><strong>Contract Digest:</strong> <code>{html.escape(str(task_data.get("contract_digest", ""))[:28])}...</code></li>
+          <li><strong>Snapshot ID:</strong> <code>{html.escape(str(snapshot_data.get("snapshot_id", ""))[:28])}...</code></li>
+          <li><strong>Snapshot Captured At:</strong> {snapshot_captured_at}</li>
         </ul>
       </div>
 
       <!-- Verdict & Reasons -->
       <div class="card">
-        <h2>Evaluator Verdict & Reasons</h2>
+        <h2>Last Persisted Evaluation</h2>
         <ul class="meta-list">
+          <li><strong>Status:</strong> <span class="pill {pill_class}">{html.escape(verdict_display)}</span></li>
           <li><strong>Verdict:</strong> <strong>{badge_text}</strong></li>
-          <li><strong>Evaluated At:</strong> {html.escape(verdict_data.get("evaluated_at", ""))}</li>
+          <li><strong>Evaluated At:</strong> {evaluated_at_text}</li>
+          <li><strong>Snapshot Captured At:</strong> {snapshot_captured_at}</li>
           <li><strong>Blockers:</strong>
             {reasons_html}
           </li>
@@ -391,11 +450,11 @@ def render_dashboard_html(receipt: dict[str, Any] | None) -> str:
     </div>
 
     <footer>
-      ProofMesh Local Control Panel &bull; Read-only HTTP on 127.0.0.1 &bull; Zero external network dependencies
+      ProofMesh Local Control Panel &bull; Read-only HTTP on 127.0.0.1 &bull; Last Persisted Evaluation &bull; Zero external network dependencies
     </footer>
   </div>
   <script>
-    // Auto-refresh every 5 seconds if not paused
+    // Auto-refresh every 5 seconds if not paused (loads last persisted state, no live check)
     let autoRefresh = true;
     setInterval(() => {{
       if (autoRefresh) location.reload();
@@ -448,6 +507,21 @@ class ProofMeshUIHandler(http.server.BaseHTTPRequestHandler):
         self.send_response(405)
         self.end_headers()
 
+    def do_PUT(self) -> None:
+        """Reject non-GET requests as read-only."""
+        self.send_response(405)
+        self.end_headers()
+
+    def do_DELETE(self) -> None:
+        """Reject non-GET requests as read-only."""
+        self.send_response(405)
+        self.end_headers()
+
+    def do_PATCH(self) -> None:
+        """Reject non-GET requests as read-only."""
+        self.send_response(405)
+        self.end_headers()
+
 
 def create_ui_server(
     store: ProofMeshStore,
@@ -456,7 +530,7 @@ def create_ui_server(
     host: str = "127.0.0.1",
     port: int = 8765,
 ) -> http.server.HTTPServer:
-    """Create a configured read-only HTTP server bound to 127.0.0.1."""
+    """Create a configured read-only HTTP server bound to 127.0.0.1 or localhost."""
     if host not in ("127.0.0.1", "localhost"):
         raise ValueError(f"ProofMesh UI must only bind to 127.0.0.1 or localhost, got: {host}")
 

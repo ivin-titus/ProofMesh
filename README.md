@@ -6,27 +6,29 @@ ProofMesh is designed to keep coding agents aligned with an approved task, detec
 
 ## Project status
 
-**Full MVP Control Loop Implemented & Verified (Checkpoints 0 through 7).**
+**Full MVP Control Loop Implemented, Security-Hardened & Verified (Checkpoints 0 through 8 + Security Stabilization).**
 
+- **Full Test Suite:** 231 automated tests passing on target CPython 3.14.9 (`.venv314`), 176 passing on host Python 3.12.3 (`.venv`).
 - **Checkpoint 0 (Integration spike):** Verified Google Antigravity CLI (`agy` 1.4.7) lifecycle hooks (`PreInvocation`, `PreToolUse`, `Stop`) with denial and continuation semantics, plus live stdio MCP client/server round-trip.
 - **Checkpoint 1, 1.1 & 1.2 (Package, policy packaging, migrations, and persistent state):**
   - Package configured via `pyproject.toml` (`requires-python = ">=3.14,<3.15"`, locked via `uv.lock` for CPython 3.14, and verified on host Python 3.12).
   - Canonical default trusted policy packaged in `proofmesh.resources` (`src/proofmesh/resources/default-policy.toml`), guaranteed to survive wheel installation.
   - Strict Pydantic v2 models with UTC-normalized timestamps, bounded fields, and deeply immutable nested containers (`tuple`, `MappingProxyType`) preventing in-place mutations.
-  - Transactional SQLite migrations with atomic schema upgrades and rollback on failure.
+  - Transactional SQLite migrations with atomic schema upgrades and rollback on failure (migration `002_snapshot_observation_and_loop_attempts.sql`).
   - Parameterized SQLite store with secure directory permissions (`0700`) and file permissions (`0600`) outside target repositories.
-- **Checkpoint 2 (Intent / TaskFile):** Markdown TaskFiles with TOML front matter, immutable TaskRevisions, deterministic SHA-256 contract digests, and proposal/human approval workflow.
-- **Checkpoint 3 (Repository Snapshot & Scope):** SHA-256 file fingerprinting, git state capture, symlink escape protection, and fail-closed pattern-based scope analysis (`allow_paths`, `restricted_paths`, file limit).
-- **Checkpoint 4 (Verification & Evidence Freshness):** Safe allowlisted subprocess gate execution (`shell=False`, argument arrays, bounded 2000-char summaries, execution timeouts) and snapshot-based evidence freshness tracking.
-- **Checkpoint 5 (Intervention & Verdict):** Deterministic evaluator returning `ALLOW`, `BLOCK`, or `REQUIRE_APPROVAL`, policy mandatory gate enforcement, repeated failure loop detector with budget exhaustion, and Markdown handoff cards.
-- **Checkpoint 6 (Seeded CLI Demo & Receipts):** Unified `proofmesh` CLI, 9-phase deterministic seeded scenario (zero model/network dependency), human-readable Markdown reports, and canonical JSON receipts with SHA-256 digest.
-- **Checkpoint 7 (MCP Server & Host Hook Adapter):** Official Python MCP server exposing tools (`get_task_contract`, `inspect_changes`, `run_verification`, `get_status`, `claim_completion`, `get_handoff`) and Antigravity lifecycle hook adapter.
+- **Checkpoint 2 (Intent / TaskFile):** Markdown TaskFiles with TOML front matter, immutable TaskRevisions, deterministic SHA-256 contract digests, and proposal/human approval workflow. Untrusted self-approval keys stripped.
+- **Checkpoint 3 (Repository Snapshot & Scope):** SHA-256 file fingerprinting, git state capture, symlink escape protection, fail-closed pattern-based scope analysis (`allow_paths`, `restricted_paths`, file limit), and complete observation tracking.
+- **Checkpoint 4 (Verification & Evidence Freshness):** Safe allowlisted subprocess gate execution (`shell=False`, argument arrays, bounded 64KB buffers, 2000-char summaries, execution timeouts, process group kills) and snapshot-based evidence freshness tracking with invalidation on concurrent code mutation.
+- **Checkpoint 5 (Intervention & Verdict):** Deterministic evaluator returning `ALLOW`, `BLOCK`, or `REQUIRE_APPROVAL`, policy mandatory gate enforcement, repeated failure loop detector with persistent restart tracking and budget exhaustion, and Markdown handoff cards.
+- **Checkpoint 6 (Seeded CLI Demo & Receipts):** Unified `proofmesh` CLI, 10-phase deterministic recovery scenario (`Intent → Baseline → Scope violation/BLOCK → Clean Correction → Verification/Fresh Evidence → ALLOW → Tamper-evident receipt`), human-readable Markdown reports, and canonical JSON receipts with SHA-256 digest. Non-destructive safety checks protecting user files and databases.
+- **Checkpoint 7 (MCP Server & Host Hook Adapter):** Official Python MCP server with CLI argument entrypoint, pure stdio protocol separation, and Antigravity lifecycle hook adapter with strict path traversal rejection and honest integration status reporting.
+- **Checkpoint 8 (Presentation & Web Panel):** Minimal, zero-dependency read-only local web status panel (`proofmesh ui`) bound to `127.0.0.1`, returning deterministic digests without database mutation on GET requests.
 
 ## Quick Start & Usage
 
 ### 1. Run the Deterministic Seeded Demo
 
-Run the self-contained 9-phase control loop demo:
+Run the self-contained 10-phase recovery control loop demo:
 
 ```bash
 # Using Python 3.14 venv or python directly:

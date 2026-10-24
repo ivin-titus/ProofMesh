@@ -16,7 +16,7 @@ import sys
 from typing import Any, Sequence
 import uuid
 
-from proofmesh.config import get_default_policy, load_policy_file
+from proofmesh.config import compute_policy_digest, resolve_trusted_policy
 from proofmesh.core.evaluator import evaluate_session
 from proofmesh.core.handoff import generate_handoff
 from proofmesh.core.repo_snapshot import capture_snapshot
@@ -65,17 +65,50 @@ def _resolve_project(base_path: Path | None = None) -> tuple[str, Path, ProofMes
     return proj_id, root_dir, store
 
 
-def _resolve_session(store: ProofMeshStore, session_id: str | None = None) -> Session | None:
-    """Retrieve requested session or the latest session from store."""
+def _resolve_session(
+    store: ProofMeshStore,
+    session_id: str | None = None,
+    project_id: str | None = None,
+    repo_root: Path | None = None,
+) -> Session | None:
+    """Retrieve requested session or the active/latest session scoped by project and repo."""
     if session_id:
-        return store.get_session(session_id)
+        return store.get_session(
+            session_id,
+            project_id=project_id,
+            repo_root=str(repo_root) if repo_root else None,
+        )
+
+    if project_id:
+        active = store.get_active_session_for_project(
+            project_id,
+            repo_root=str(repo_root) if repo_root else None,
+        )
+        if active is not None:
+            return active
+
     conn = store.get_connection()
     try:
-        row = conn.execute(
-            "SELECT session_id FROM sessions ORDER BY started_at DESC LIMIT 1;"
-        ).fetchone()
+        if project_id:
+            row = conn.execute(
+                """
+                SELECT s.session_id FROM sessions s
+                JOIN tasks t ON s.task_id = t.task_id
+                WHERE t.project_id = ?
+                ORDER BY s.started_at DESC LIMIT 1;
+                """,
+                (project_id,),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT session_id FROM sessions ORDER BY started_at DESC LIMIT 1;"
+            ).fetchone()
         if row:
-            return store.get_session(row["session_id"])
+            return store.get_session(
+                row["session_id"],
+                project_id=project_id,
+                repo_root=str(repo_root) if repo_root else None,
+            )
         return None
     finally:
         conn.close()
@@ -85,7 +118,7 @@ def _get_or_create_active_session(
     store: ProofMeshStore, project_id: str, repo_root: Path
 ) -> Session:
     """Get the active session, or auto-create one if an approved task revision exists."""
-    existing = _resolve_session(store)
+    existing = store.get_active_session_for_project(project_id, repo_root=str(repo_root))
     if existing is not None and existing.state == SessionState.ACTIVE:
         return existing
 
@@ -116,6 +149,8 @@ def _get_or_create_active_session(
     baseline = capture_snapshot(repo_root)
     store.save_snapshot(baseline)
 
+    policy, policy_digest = resolve_trusted_policy()
+
     session_id = f"sess-{uuid.uuid4().hex[:10]}"
     session = Session(
         session_id=session_id,
@@ -124,53 +159,14 @@ def _get_or_create_active_session(
         repo_root=str(repo_root),
         baseline_snapshot_id=baseline.snapshot_id,
         current_snapshot_id=baseline.snapshot_id,
-        profile=OperatingProfile.FLOW,
-        policy_digest="sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        profile=policy.profile,
+        policy_digest=policy_digest,
         integration_status=IntegrationStatus.ENFORCED,
         state=SessionState.ACTIVE,
         started_at=datetime.now(timezone.utc),
     )
     store.save_session(session)
     return session
-
-
-def _resolve_policy(
-    repo_root: Path, task_revision: TaskRevision | None = None
-) -> TrustedPolicy:
-    """Load policy from repo if present, otherwise use packaged default policy."""
-    policy_file = repo_root / "policy.toml"
-    if policy_file.is_file():
-        base_policy = load_policy_file(policy_file)
-    else:
-        base_policy = get_default_policy()
-
-    gates = dict(base_policy.gates)
-
-    # Ensure python test runners use sys.executable
-    if "pytest" not in gates:
-        gates["pytest"] = GatePolicy(
-            provider="pytest",
-            command=(sys.executable, "-m", "pytest", "-q"),
-            timeout_seconds=60,
-            mandatory=True,
-        )
-
-    if "test" in gates and gates["test"].command == ("pytest",):
-        gates["test"] = gates["test"].model_copy(
-            update={"command": (sys.executable, "-m", "pytest", "-q")}
-        )
-
-    # If task specifically specifies required_gates with 'pytest' and not 'test',
-    # don't let default policy's 'test' gate block the evaluation.
-    if (
-        task_revision is not None
-        and "pytest" in task_revision.required_gates
-        and "test" not in task_revision.required_gates
-        and "test" in gates
-    ):
-        gates["test"] = gates["test"].model_copy(update={"mandatory": False})
-
-    return base_policy.model_copy(update={"gates": gates})
 
 
 # -----------------------------------------------------------------------------
@@ -212,6 +208,7 @@ def cmd_task_propose(args: argparse.Namespace) -> int:
 
     content = task_file.read_text(encoding="utf-8")
     project_id, _, store = _resolve_project()
+    policy, _ = resolve_trusted_policy()
 
     try:
         parsed = parse_taskfile(content)
@@ -220,6 +217,7 @@ def cmd_task_propose(args: argparse.Namespace) -> int:
             task_id=parsed.task_id,
             content=content,
             project_id=project_id,
+            known_gates=policy.gates.keys(),
         )
         print(f"Task proposed: {rev.task_id} (revision {rev.revision})")
         print(f"  Summary:         {rev.summary}")
@@ -258,7 +256,7 @@ def cmd_task_approve(args: argparse.Namespace) -> int:
 def cmd_status(args: argparse.Namespace) -> int:
     """Display active session status, latest snapshot, and verdicts."""
     project_id, root_dir, store = _resolve_project()
-    session = _resolve_session(store, args.session_id)
+    session = _resolve_session(store, args.session_id, project_id=project_id, repo_root=root_dir)
 
     if session is None:
         print(f"Project '{project_id}' has no active or recorded sessions.")
@@ -297,8 +295,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
         print(f"Error resolving active session: {e}", file=sys.stderr)
         return 2
 
-    task_revision = store.get_task_revision(session.task_id, session.contract_revision)
-    policy = _resolve_policy(root_dir, task_revision)
+    policy, _ = resolve_trusted_policy()
     gate_id = args.gate_id
     gate_policy = policy.gates.get(gate_id)
 
@@ -342,7 +339,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     """Evaluate active session against scope, evidence, and policy."""
     project_id, root_dir, store = _resolve_project()
 
-    session = _resolve_session(store)
+    session = _resolve_session(store, project_id=project_id, repo_root=root_dir)
     if session is None:
         print("Error: No active session to evaluate.", file=sys.stderr)
         return 2
@@ -365,7 +362,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
 
     scope_result = analyze_scope(baseline_snapshot, current_snapshot, task_revision.scope)
     evidence_records = store.list_evidence_for_session(session.session_id)
-    policy = _resolve_policy(root_dir, task_revision)
+    policy, policy_digest = resolve_trusted_policy()
 
     verdict = evaluate_session(
         session=session,
@@ -374,6 +371,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
         evidence_records=evidence_records,
         scope_result=scope_result,
         policy=policy,
+        effective_policy_digest=policy_digest,
     )
     store.save_verdict(verdict)
 
@@ -386,7 +384,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
         print(f"❌ VERDICT: {verdict.verdict.value.upper()} (Enforcement: {verdict.enforcement_level.value})")
         for reason in verdict.reasons:
             print(f"  - {reason}")
-        handoff = generate_handoff(task_revision, verdict, scope_result, evidence_records)
+        handoff = generate_handoff(task_revision, verdict, scope_result, evidence_records, policy=policy)
         print("\n" + handoff)
         return 1
 
@@ -394,7 +392,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
 def cmd_report(args: argparse.Namespace) -> int:
     """Render Markdown verification report or export canonical JSON receipt."""
     project_id, root_dir, store = _resolve_project()
-    session = _resolve_session(store, args.session_id)
+    session = _resolve_session(store, args.session_id, project_id=project_id, repo_root=root_dir)
 
     if session is None:
         print("Error: No session found to report.", file=sys.stderr)
@@ -420,7 +418,7 @@ def cmd_report(args: argparse.Namespace) -> int:
     if verdicts:
         verdict = verdicts[-1]
     else:
-        policy = _resolve_policy(root_dir, task_revision)
+        policy, policy_digest = resolve_trusted_policy()
         verdict = evaluate_session(
             session=session,
             task_revision=task_revision,
@@ -428,6 +426,7 @@ def cmd_report(args: argparse.Namespace) -> int:
             evidence_records=evidence_records,
             scope_result=scope_result,
             policy=policy,
+            effective_policy_digest=policy_digest,
         )
         store.save_verdict(verdict)
 

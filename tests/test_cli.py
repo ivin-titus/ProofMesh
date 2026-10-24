@@ -27,13 +27,13 @@ summary = "CLI integration test task"
 risk_level = "low"
 allow_paths = ["src/**", "tests/**", "pytest.ini"]
 restricted_paths = ["config/**", ".git/**"]
-required_gates = ["pytest"]
+required_gates = ["test"]
 +++
 
 # task-cli-test
 
 ## Acceptance criteria
-- [AC-1] Verify CLI execution (gates: pytest)
+- [AC-1] Verify CLI execution (gates: test)
 """
 
 
@@ -132,9 +132,9 @@ def test_cli_verify_and_evaluate_flow(
     assert "task-cli-test" in status_out
 
     # 3. Verify gate
-    assert main(["verify", "pytest"]) == 0
+    assert main(["verify", "test"]) == 0
     verify_out = capsys.readouterr().out
-    assert "Gate 'pytest': PASSED" in verify_out
+    assert "Gate 'test': PASSED" in verify_out
 
     # 4. Evaluate
     assert main(["evaluate"]) == 0
@@ -206,7 +206,7 @@ def test_cli_status_and_report_with_session_id(
     tf.write_text(SAMPLE_TASKFILE, encoding="utf-8")
     assert main(["task", "propose", str(tf)]) == 0
     assert main(["task", "approve", "task-cli-test", "1", "--by", "bob"]) == 0
-    assert main(["verify", "pytest"]) == 0
+    assert main(["verify", "test"]) == 0
 
     # Get session ID from status
     assert main(["status"]) == 0
@@ -252,12 +252,13 @@ def test_cli_failing_gate_and_blocked_evaluation(
     tf.write_text(SAMPLE_TASKFILE, encoding="utf-8")
     assert main(["task", "propose", str(tf)]) == 0
     assert main(["task", "approve", "task-cli-test", "1", "--by", "alice"]) == 0
+    capsys.readouterr()
 
     # Gate verify should fail and return 1
-    exit_code = main(["verify", "pytest"])
+    exit_code = main(["verify", "test"])
     assert exit_code == 1
     verify_out = capsys.readouterr().out
-    assert "Gate 'pytest': FAILED" in verify_out
+    assert "Gate 'test': FAILED" in verify_out
 
     # Evaluate should fail and return 1 with BLOCK verdict
     eval_code = main(["evaluate"])

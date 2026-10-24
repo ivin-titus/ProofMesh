@@ -500,11 +500,11 @@ def test_antigravity_fixtures_parity(test_env):
     parsed_tool = parse_hook_payload(pre_tool_raw)
     assert isinstance(parsed_tool, PreToolUsePayload)
     assert parsed_tool.toolCall.name == "run_command"
-    assert parsed_tool.toolCall.args["CommandLine"] == "echo blocked_command"
+    assert parsed_tool.toolCall.args["CommandLine"] == "git reset --hard HEAD"
 
     resp_tool = adapter.handle_pre_tool_use(parsed_tool)
     assert resp_tool.decision == "deny"
-    assert "blocked by policy" in resp_tool.reason
+    assert "destructive operation" in resp_tool.reason
 
     # Compare structure with fixture
     deny_fixture = json.loads((AGY_FIXTURES / "pre_tool_use_deny_response.json").read_text())

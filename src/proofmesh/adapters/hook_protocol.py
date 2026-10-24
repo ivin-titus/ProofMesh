@@ -10,11 +10,14 @@ from enum import StrEnum
 import fnmatch
 import json
 from pathlib import Path
+import re
 from typing import Any, Sequence
 
 from pydantic import BaseModel, Field
 
+from proofmesh.core.loop_detector import LoopDetector
 from proofmesh.models import (
+    BudgetPolicy,
     ScopePolicy,
     VerdictOutcome,
     VerdictRecord,
@@ -173,7 +176,96 @@ FILE_PATH_ARG_KEYS = (
     "file_path",
     "filePath",
     "filename",
+    "file",
+    "filepath",
 )
+
+
+def normalize_and_validate_path(
+    raw_path: str,
+    workspace_root: str | Path | None = None,
+) -> str:
+    """Safely normalize and validate target path within canonical workspace root.
+
+    Args:
+        raw_path: Proposed target path string.
+        workspace_root: Optional workspace root directory. Defaults to Path.cwd().
+
+    Returns:
+        Normalized relative POSIX path within the workspace root.
+
+    Raises:
+        ValueError: If path contains NUL bytes, traversal components ('..'),
+            drive-qualified paths ('C:\\'), UNC paths ('\\\\'), or attempts to escape
+            canonical workspace containment (including symlink escapes or nonexistent
+            file parent directory escapes).
+    """
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        raise ValueError("Target file path cannot be empty")
+
+    if "\0" in raw_path:
+        raise ValueError("Path contains prohibited NUL byte")
+
+    raw_clean = raw_path.strip()
+
+    # Reject drive-qualified (e.g. C:\ or C:/) or UNC network paths
+    if re.match(r"^[a-zA-Z]:", raw_clean):
+        raise ValueError(f"Drive-qualified paths are not permitted: '{raw_path}'")
+    if raw_clean.startswith(("\\\\", "//")):
+        raise ValueError(f"UNC network paths are not permitted: '{raw_path}'")
+
+    # Normalize Windows backslashes to forward slashes safely
+    norm = raw_clean.replace("\\", "/")
+
+    # Check for drive-qualified paths after backslash replacement
+    if re.match(r"^[a-zA-Z]:", norm):
+        raise ValueError(f"Drive-qualified paths are not permitted: '{raw_path}'")
+
+    # Reject traversal components ('..')
+    parts = [p for p in norm.split("/") if p and p != "."]
+    if ".." in parts:
+        raise ValueError(f"Path traversal component ('..') detected: '{raw_path}'")
+
+    ws_root = Path(workspace_root).resolve() if workspace_root else Path.cwd().resolve()
+
+    if norm.startswith("/"):
+        target_path = Path(norm)
+    else:
+        target_path = ws_root / norm
+
+    # Validate workspace containment
+    if target_path.exists() or target_path.is_symlink():
+        resolved_target = target_path.resolve()
+        if not resolved_target.is_relative_to(ws_root):
+            raise ValueError(
+                f"Path '{raw_path}' resolves to '{resolved_target}', escaping workspace root '{ws_root}'"
+            )
+        rel_path = resolved_target.relative_to(ws_root).as_posix()
+    else:
+        # Nonexistent target file
+        resolved_theoretical = target_path.resolve()
+        if not resolved_theoretical.is_relative_to(ws_root):
+            raise ValueError(
+                f"Target path '{raw_path}' resolves to '{resolved_theoretical}', escaping workspace root '{ws_root}'"
+            )
+
+        # For nonexistent target files, validate their existing parent directory path
+        parent = target_path.parent
+        while not parent.exists() and parent != parent.parent:
+            parent = parent.parent
+
+        if parent.exists():
+            resolved_parent = parent.resolve()
+            if not resolved_parent.is_relative_to(ws_root):
+                raise ValueError(
+                    f"Target path parent directory '{parent}' resolves to '{resolved_parent}', escaping workspace root '{ws_root}'"
+                )
+
+        rel_path = resolved_theoretical.relative_to(ws_root).as_posix()
+
+    if rel_path == ".":
+        return ""
+    return rel_path
 
 
 def extract_target_file(
@@ -190,27 +282,28 @@ def extract_target_file(
 
     Returns:
         Normalized relative POSIX path if a file target is identified; otherwise None.
+
+    Raises:
+        ValueError: If path contains NUL bytes, traversal components, drive prefixes,
+            UNC prefixes, or escapes the workspace root.
     """
     raw_path: str | None = None
     for k in FILE_PATH_ARG_KEYS:
-        if k in tool_args and isinstance(tool_args[k], str):
-            raw_path = tool_args[k]
-            break
+        if k in tool_args:
+            val = tool_args[k]
+            if isinstance(val, str):
+                raw_path = val
+                break
 
-    if raw_path is None and tool_name not in FILE_WRITE_TOOLS:
+    if raw_path is None:
         return None
 
-    if not raw_path:
+    if not raw_path.strip():
+        if tool_name in FILE_WRITE_TOOLS:
+            raise ValueError("Target file path cannot be empty")
         return None
 
-    norm_path = raw_path.replace("\\", "/").strip()
-    if workspace_root:
-        ws_root_str = str(Path(workspace_root).resolve()).replace("\\", "/")
-        if norm_path.startswith(ws_root_str):
-            norm_path = norm_path[len(ws_root_str):].lstrip("/")
-
-    norm_path = norm_path.lstrip("/")
-    return norm_path if norm_path else None
+    return normalize_and_validate_path(raw_path, workspace_root=workspace_root)
 
 
 def check_command_scope(
@@ -218,6 +311,9 @@ def check_command_scope(
     scope_policy: ScopePolicy | None = None,
 ) -> tuple[bool, str | None]:
     """Check whether a shell command violates scope or security boundaries.
+
+    Note: Substring checks intercept known destructive operations and restricted
+    path patterns, but do not claim to provide complete command isolation.
 
     Args:
         command_line: Proposed shell command string.
@@ -227,27 +323,35 @@ def check_command_scope(
         Tuple of (allowed: bool, reason: str | None).
     """
     cmd = command_line.strip()
-    # Check for known blocked command pattern in test fixtures
-    if "blocked_command" in cmd:
-        return False, "ProofMesh test: command blocked by policy"
 
-    # Flag commands that attempt to overwrite/delete protected paths
-    dangerous_keywords = (
+    # Intercept known destructive operations on repository state
+    destructive_patterns = (
         "git checkout --",
+        "git checkout .",
         "git restore",
         "git reset --hard",
+        "git reset HEAD",
+        "git clean -",
         "rm -rf tests",
         "rm -rf src",
+        "rm -rf .git",
+        "rm -rf docs",
+        "rm -rf .",
+        "rm -rf *",
+        "rm -r tests",
+        "rm -r src",
     )
-    for kw in dangerous_keywords:
-        if kw in cmd:
-            return False, f"Command contains prohibited destructive operation: '{kw}'"
+    for pat in destructive_patterns:
+        if pat in cmd:
+            return False, f"Command contains prohibited destructive operation: '{pat}'"
 
     if scope_policy:
         for restricted_pat in scope_policy.restricted_paths:
-            # Check if restricted pattern is referenced in destructive flags
+            # Check if restricted pattern is targeted by file removal or clean commands
             clean_pat = restricted_pat.strip("./*")
-            if clean_pat and clean_pat in cmd and ("rm " in cmd or "git clean" in cmd):
+            if clean_pat and clean_pat in cmd and any(
+                op in cmd for op in ("rm ", "git clean", "shred ", "truncate ", "dd ", "mv ")
+            ):
                 return False, f"Command targets restricted path pattern: '{restricted_pat}'"
 
     return True, None
@@ -271,9 +375,26 @@ def evaluate_pre_tool_use(
     tool_name = payload.toolCall.name
     tool_args = payload.toolCall.args or {}
 
-    # 1. Check file-touching tools
-    target_path = extract_target_file(tool_name, tool_args, workspace_root)
-    if target_path is not None:
+    ws_root = (
+        workspace_root
+        or (payload.workspacePaths[0] if payload.workspacePaths else None)
+        or Path.cwd()
+    )
+
+    # 1. Check file-write tools
+    if tool_name in FILE_WRITE_TOOLS:
+        try:
+            target_path = extract_target_file(tool_name, tool_args, ws_root)
+        except ValueError as exc:
+            return PreToolUseDenyResponse(
+                reason=f"ProofMesh path security: {exc}"
+            )
+
+        if not target_path:
+            return PreToolUseDenyResponse(
+                reason=f"File modification tool '{tool_name}' missing, empty, or unrecognized target path argument"
+            )
+
         # Check against restricted paths first
         for pat in scope_policy.restricted_paths:
             if fnmatch.fnmatch(target_path, pat):
@@ -293,7 +414,15 @@ def evaluate_pre_tool_use(
 
         return PreToolUseAllowResponse()
 
-    # 2. Check run_command tool
+    # 2. Check other tools with potential path arguments (e.g. read_file)
+    try:
+        read_target = extract_target_file(tool_name, tool_args, ws_root)
+    except ValueError as exc:
+        return PreToolUseDenyResponse(
+            reason=f"ProofMesh path security: {exc}"
+        )
+
+    # 3. Check run_command tool
     if tool_name == "run_command":
         cmd = str(tool_args.get("CommandLine", tool_args.get("command", "")))
         allowed, reason = check_command_scope(cmd, scope_policy)
@@ -310,18 +439,30 @@ def evaluate_stop(
     verdict: VerdictRecord | None = None,
     unfulfilled_gates: Sequence[str] = (),
     handoff_summary: str | None = None,
+    loop_detector: LoopDetector | None = None,
+    budget: BudgetPolicy | None = None,
+    session_id: str | None = None,
+    budget_exhausted: bool = False,
 ) -> StopResponse:
     """Evaluate a Stop hook event, enforcing continuation if verification is missing.
+
+    Respects LoopDetector retry budget: if retries are exhausted, allows the host
+    to stop to prevent infinite loops, but keeps verdict as BLOCK and explains
+    budget exhaustion in the response reason.
 
     Args:
         payload: StopPayload from host.
         verdict: Evaluated VerdictRecord, if available.
         unfulfilled_gates: Mandatory verification gates that have not passed.
         handoff_summary: Optional markdown handoff summary card.
+        loop_detector: Optional LoopDetector tracking failure attempts.
+        budget: Optional BudgetPolicy defining max retries.
+        session_id: Session identifier for loop detection lookup.
+        budget_exhausted: Explicit flag if budget has already been determined exhausted.
 
     Returns:
         StopContinueResponse if verification is missing/stale or verdict is BLOCK;
-        StopAllowResponse if session is cleanly verified.
+        StopAllowResponse if session is cleanly verified or retry budget is exhausted.
     """
     is_blocked = False
     reasons: list[str] = []
@@ -335,8 +476,30 @@ def evaluate_stop(
             is_blocked = True
             reasons.extend(verdict.reasons)
 
+    # Check budget exhaustion
+    exhausted = budget_exhausted
+    if not exhausted and loop_detector is not None and session_id is not None:
+        effective_budget = budget or BudgetPolicy()
+        for g in unfulfilled_gates:
+            if loop_detector.is_budget_exhausted(session_id, g, effective_budget):
+                exhausted = True
+                break
+        if not exhausted and verdict is not None:
+            for (s, _, _), count in loop_detector._failures.items():
+                if s == session_id and count >= effective_budget.max_retries:
+                    exhausted = True
+                    break
+
     if is_blocked:
         msg_details = "; ".join(reasons) if reasons else "verification required before completion"
+        if exhausted:
+            # Allow host to stop to prevent infinite loops, keeping verdict as BLOCK
+            reason_msg = (
+                f"ProofMesh: Retry budget exhausted. Halting continuation with verdict BLOCK. "
+                f"Unresolved blockers: {msg_details}"
+            )
+            return StopAllowResponse(reason=reason_msg)
+
         reason_msg = handoff_summary or f"ProofMesh: {msg_details}"
         return StopContinueResponse(reason=reason_msg)
 

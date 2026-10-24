@@ -92,13 +92,22 @@ def test_seeded_demo_end_to_end(tmp_path: Path):
     assert "# ProofMesh Verification Report" in report_content
     assert "task-calc-extension" in report_content
     assert "pytest" in report_content
-    assert "BLOCK" in report_content
+    assert "ALLOW" in report_content
 
     receipt_data = json.loads(receipt_file.read_text(encoding="utf-8"))
     assert receipt_data["schema_version"] == "1.0"
     assert receipt_data["receipt_digest"].startswith("sha256:")
     assert receipt_data["task"]["task_id"] == "task-calc-extension"
-    assert receipt_data["verdict"]["verdict"] == VerdictOutcome.BLOCK.value
+    assert receipt_data["verdict"]["verdict"] == VerdictOutcome.ALLOW.value
+
+    # Preserved blocked artifacts
+    blocked_report_file = target_dir / "report-blocked.md"
+    blocked_receipt_file = target_dir / "report-blocked.json"
+    assert blocked_report_file.is_file()
+    assert blocked_receipt_file.is_file()
+    assert "BLOCK" in blocked_report_file.read_text(encoding="utf-8")
+    blocked_receipt_data = json.loads(blocked_receipt_file.read_text(encoding="utf-8"))
+    assert blocked_receipt_data["verdict"]["verdict"] == VerdictOutcome.BLOCK.value
 
 
 def test_seeded_demo_runnable_twice_in_a_row_cleanly(tmp_path: Path):
@@ -165,11 +174,14 @@ def test_stale_evidence_invalidation_detected(tmp_path: Path):
     baseline = res["baseline_snapshot"]
     evidence = res["evidence"]
 
-    # At this point, target_dir has config/security.toml, report.json, report.md.
+    # At this point, target_dir has report artifacts.
     # Remove them so scope is clean for the test
     (target_dir / "config" / "security.toml").unlink(missing_ok=True)
     (target_dir / "report.json").unlink(missing_ok=True)
     (target_dir / "report.md").unlink(missing_ok=True)
+    (target_dir / "report-blocked.json").unlink(missing_ok=True)
+    (target_dir / "report-blocked.md").unlink(missing_ok=True)
+    (target_dir / ".proofmesh-fixture").unlink(missing_ok=True)
 
     # Now make an additional allowed edit in src/math_service.py AFTER evidence was captured
     math_file = target_dir / "src" / "math_service.py"

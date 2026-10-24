@@ -15,6 +15,7 @@ from proofmesh.models import (
     EvidenceStatus,
     ScopeAnalysisResult,
     TaskRevision,
+    TrustedPolicy,
     VerdictOutcome,
     VerdictRecord,
 )
@@ -25,6 +26,7 @@ def generate_handoff(
     verdict: VerdictRecord,
     scope_result: ScopeAnalysisResult,
     evidence_records: Sequence[EvidenceRecord],
+    policy: TrustedPolicy | None = None,
 ) -> str:
     """Generate a compact, clear Markdown state card for task handoff.
 
@@ -33,11 +35,22 @@ def generate_handoff(
         verdict: Evaluated verdict record.
         scope_result: Result of scope analysis.
         evidence_records: Collection of verification evidence records.
+        policy: Optional trusted policy to include policy-level mandatory gates.
 
     Returns:
         Formatted Markdown state card string.
     """
     lines: list[str] = []
+
+    # Compute effective mandatory gates (union of task gates and policy mandatory gates)
+    mandatory_policy_gates = set()
+    if policy is not None and getattr(policy, "gates", None):
+        mandatory_policy_gates = {
+            gate_id
+            for gate_id, gate_cfg in policy.gates.items()
+            if getattr(gate_cfg, "mandatory", False)
+        }
+    effective_gates = sorted(set(task_revision.required_gates) | mandatory_policy_gates)
 
     # Header
     verdict_badge = "✅ ALLOW" if verdict.verdict == VerdictOutcome.ALLOW else f"❌ {verdict.verdict.value}"
@@ -69,10 +82,10 @@ def generate_handoff(
     # Verification Status
     lines.append("## Verification Status")
     lines.append("")
-    if not task_revision.required_gates:
+    if not effective_gates:
         lines.append("No verification gates required for this task revision.")
     else:
-        for gate in task_revision.required_gates:
+        for gate in effective_gates:
             gate_records = [e for e in evidence_records if e.gate_id == gate]
             if not gate_records:
                 lines.append(f"- Gate `{gate}`: ⚠️ **MISSING** (no evidence recorded)")
@@ -117,7 +130,7 @@ def generate_handoff(
                 f"{step}. Revert or adjust out-of-scope or restricted file modifications, or submit a contract amendment."
             )
             step += 1
-        for gate in task_revision.required_gates:
+        for gate in effective_gates:
             gate_records = [e for e in evidence_records if e.gate_id == gate]
             if not gate_records:
                 lines.append(f"{step}. Run mandatory verification gate `{gate}`.")

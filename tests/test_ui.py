@@ -30,16 +30,20 @@ def test_render_dashboard_html_populated(tmp_path: Path) -> None:
     demo_dir = tmp_path / "demo_target"
     db_file = tmp_path / "store" / "demo.db"
     demo_result = run_seeded_demo(demo_dir, db_path=db_file)
-    receipt = demo_result["receipt_json"]
+    blocked_receipt = demo_result["blocked_receipt_json"]
 
-    html = render_dashboard_html(receipt)
-    assert "<!DOCTYPE html>" in html
-    assert "ProofMesh Control Layer" in html
-    assert "task-calc-extension" in html
-    assert "BLOCK" in html
-    assert "config/security.toml" in html
-    assert "Restricted" in html
-    assert "pytest" in html
+    html_blocked = render_dashboard_html(blocked_receipt)
+    assert "<!DOCTYPE html>" in html_blocked
+    assert "ProofMesh Control Layer" in html_blocked
+    assert "task-calc-extension" in html_blocked
+    assert "BLOCK" in html_blocked
+    assert "config/security.toml" in html_blocked
+    assert "Restricted" in html_blocked
+
+    final_receipt = demo_result["receipt_json"]
+    html_final = render_dashboard_html(final_receipt)
+    assert "ALLOW" in html_final
+    assert "pytest" in html_final
 
 
 def test_ui_server_endpoints_and_security(tmp_path: Path) -> None:

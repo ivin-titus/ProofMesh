@@ -1,10 +1,99 @@
 """Task service for managing task proposals, amendments, and approval lifecycle."""
 
 from datetime import datetime, timezone
+import re
+import tomllib
 
 from proofmesh.core.taskfile_md import parse_taskfile
 from proofmesh.models import ApprovalStatus, TaskRevision
 from proofmesh.storage.store import ProofMeshStore
+
+UNTRUSTED_OR_STRIPPED_FM_KEYS = {
+    "approval_status",
+    "approved_by",
+    "approved_at",
+    "parent_revision",
+    "parent_id",
+    "parent_task_id",
+}
+
+
+def _sanitize_and_validate_front_matter(
+    content: str,
+    expected_task_id: str | None = None,
+    expected_parent_revision: int | None = None,
+    is_initial_proposal: bool = False,
+) -> str:
+    """Validate untrusted or parent fields in front matter and strip them for parsing.
+
+    Ensures that any self-approval metadata (approval_status, approved_by, approved_at)
+    in front matter is ignored, and validates parent linkage before stripping.
+    """
+    lines = content.splitlines(keepends=True)
+    start_idx: int | None = None
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped == "+++":
+            start_idx = idx
+            break
+        # Let parse_taskfile report missing or invalid front-matter delimiter
+        return content
+
+    if start_idx is None:
+        return content
+
+    end_idx: int | None = None
+    for idx in range(start_idx + 1, len(lines)):
+        if lines[idx].strip() == "+++":
+            end_idx = idx
+            break
+
+    if end_idx is None:
+        return content
+
+    fm_lines = lines[start_idx + 1 : end_idx]
+    toml_text = "".join(fm_lines)
+
+    try:
+        fm = tomllib.loads(toml_text)
+    except Exception:
+        # Let parse_taskfile handle malformed TOML
+        return content
+
+    if isinstance(fm, dict):
+        # Validate parent linkage if specified in front matter
+        if "parent_revision" in fm:
+            parent_rev = fm["parent_revision"]
+            if is_initial_proposal:
+                if parent_rev is not None:
+                    raise ValueError(
+                        f"Initial task proposal cannot specify a parent_revision (got {parent_rev})"
+                    )
+            elif expected_parent_revision is not None:
+                if parent_rev != expected_parent_revision:
+                    raise ValueError(
+                        f"Conflicting parent_revision in TaskFile: expected {expected_parent_revision}, got {parent_rev}"
+                    )
+
+        if "parent_id" in fm or "parent_task_id" in fm:
+            parent_id_val = str(fm.get("parent_id") or fm.get("parent_task_id"))
+            if expected_task_id is not None and parent_id_val != expected_task_id:
+                raise ValueError(
+                    f"Conflicting parent task ID in TaskFile: expected '{expected_task_id}', got '{parent_id_val}'"
+                )
+
+    # Filter out untrusted keys so parse_taskfile won't reject them as unexpected fields
+    cleaned_fm_lines: list[str] = []
+    key_pattern = re.compile(r"^\s*([a-zA-Z0-9_-]+)\s*=")
+    for line in fm_lines:
+        match = key_pattern.match(line)
+        if match and match.group(1) in UNTRUSTED_OR_STRIPPED_FM_KEYS:
+            continue
+        cleaned_fm_lines.append(line)
+
+    return "".join(lines[: start_idx + 1] + cleaned_fm_lines + lines[end_idx:])
 
 
 class TaskService:
@@ -52,9 +141,14 @@ class TaskService:
 
         Raises:
             ValueError: If parsing fails, task_id does not match, revision != 1,
-                or revision 1 is already approved.
+                revision 1 is already approved, or duplicate proposal has conflicting content.
         """
-        parsed = parse_taskfile(content, known_gates=known_gates)
+        sanitized_content = _sanitize_and_validate_front_matter(
+            content,
+            expected_task_id=task_id,
+            is_initial_proposal=True,
+        )
+        parsed = parse_taskfile(sanitized_content, known_gates=known_gates)
         if parsed.task_id != task_id:
             raise ValueError(
                 f"Task ID in content '{parsed.task_id}' does not match requested task_id '{task_id}'"
@@ -64,14 +158,24 @@ class TaskService:
             raise ValueError(f"Initial task proposal must have revision 1, got {parsed.revision}")
 
         existing = self.store.get_task_revision(task_id, 1)
-        if existing is not None and existing.approval_status == ApprovalStatus.APPROVED:
-            raise ValueError(f"Task '{task_id}' revision 1 has already been approved and cannot be overwritten")
+        if existing is not None:
+            if existing.approval_status == ApprovalStatus.APPROVED:
+                raise ValueError(
+                    f"Task '{task_id}' revision 1 has already been approved and cannot be overwritten"
+                )
+            if existing.contract_digest != parsed.contract_digest:
+                raise ValueError(
+                    f"Conflicting proposal for task '{task_id}' revision 1: cannot overwrite existing proposal with different content"
+                )
 
         self._ensure_project(project_id)
         revision = parsed.model_copy(
             update={
                 "parent_revision": None,
                 "approval_status": ApprovalStatus.PROPOSED,
+                "approved_by": None,
+                "approved_at": None,
+                "raw_markdown": content,
             }
         )
         self.store.save_task_revision(revision, project_id=project_id)
@@ -85,7 +189,7 @@ class TaskService:
         reason: str | None = None,
         project_id: str | None = None,
     ) -> TaskRevision:
-        """Approve a proposed task revision.
+        """Approve a proposed task revision atomically superseding any parent revision.
 
         Args:
             task_id: Task identifier.
@@ -99,7 +203,7 @@ class TaskService:
 
         Raises:
             ValueError: If approved_by is missing, revision does not exist,
-                or revision is superseded.
+                revision is superseded, or revision is already approved.
         """
         if not approved_by or not approved_by.strip():
             raise ValueError("approved_by must be a non-empty string")
@@ -113,29 +217,27 @@ class TaskService:
                 f"Cannot approve superseded task revision '{task_id}' revision {revision}"
             )
 
+        if rev.approval_status == ApprovalStatus.APPROVED:
+            if rev.approved_by != approved_by.strip():
+                raise ValueError(
+                    f"Task revision '{task_id}' revision {revision} is already approved and cannot be re-approved with different metadata"
+                )
+            raise ValueError(
+                f"Task revision '{task_id}' revision {revision} is already approved"
+            )
+
         resolved_project_id = project_id if project_id is not None else self._get_project_id_for_task(task_id)
         self._ensure_project(resolved_project_id)
 
         now_utc = datetime.now(timezone.utc)
-        updated = rev.model_copy(
-            update={
-                "approval_status": ApprovalStatus.APPROVED,
-                "approved_by": approved_by.strip(),
-                "approved_at": now_utc,
-            }
+        return self.store.approve_task_revision(
+            task_id=task_id,
+            revision=revision,
+            approved_by=approved_by.strip(),
+            approved_at=now_utc,
+            parent_revision=rev.parent_revision,
+            project_id=resolved_project_id,
         )
-        self.store.save_task_revision(updated, project_id=resolved_project_id)
-
-        # Mark parent revision as SUPERSEDED upon amendment approval
-        if rev.parent_revision is not None:
-            parent = self.store.get_task_revision(task_id, rev.parent_revision)
-            if parent is not None and parent.approval_status == ApprovalStatus.APPROVED:
-                parent_superseded = parent.model_copy(
-                    update={"approval_status": ApprovalStatus.SUPERSEDED}
-                )
-                self.store.save_task_revision(parent_superseded, project_id=resolved_project_id)
-
-        return updated
 
     def propose_amendment(
         self,
@@ -157,7 +259,8 @@ class TaskService:
 
         Raises:
             ValueError: If there is no active approved revision, task_id does not match,
-                new revision != N+1, or parsing fails.
+                new revision != N+1, conflicting parent IDs/revisions, duplicate proposal
+                conflicts, or parsing fails.
         """
         active_rev = self.get_active_revision(task_id)
         if active_rev is None:
@@ -166,7 +269,13 @@ class TaskService:
             )
 
         n = active_rev.revision
-        parsed = parse_taskfile(content, known_gates=known_gates)
+        sanitized_content = _sanitize_and_validate_front_matter(
+            content,
+            expected_task_id=task_id,
+            expected_parent_revision=n,
+            is_initial_proposal=False,
+        )
+        parsed = parse_taskfile(sanitized_content, known_gates=known_gates)
 
         if parsed.task_id != task_id:
             raise ValueError(
@@ -176,11 +285,25 @@ class TaskService:
         if parsed.revision != n + 1:
             raise ValueError(f"Amendment proposal revision must be {n + 1}, got {parsed.revision}")
 
+        existing = self.store.get_task_revision(task_id, n + 1)
+        if existing is not None:
+            if existing.approval_status == ApprovalStatus.APPROVED:
+                raise ValueError(
+                    f"Task '{task_id}' revision {n + 1} has already been approved and cannot be overwritten"
+                )
+            if existing.contract_digest != parsed.contract_digest:
+                raise ValueError(
+                    f"Conflicting proposal for task '{task_id}' revision {n + 1}: cannot overwrite existing proposal with different content"
+                )
+
         self._ensure_project(project_id)
         amended = parsed.model_copy(
             update={
                 "parent_revision": n,
                 "approval_status": ApprovalStatus.PROPOSED,
+                "approved_by": None,
+                "approved_at": None,
+                "raw_markdown": content,
             }
         )
 

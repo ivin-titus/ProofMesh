@@ -1,4 +1,4 @@
 {
   "decision": "deny",
-  "reason": "ProofMesh test: command blocked by policy"
+  "reason": "Command contains prohibited destructive operation: 'git reset --hard'"
 }

@@ -121,6 +121,17 @@ Only after the core demo passes at least twice from a clean state:
 - [x] Minimal local progress panel implemented in `src/proofmesh/ui.py` using vanilla HTML/CSS/JS and Python standard library `http.server`; bound strictly to `127.0.0.1`, off by default, completely read-only, serving live dashboard and `/api/status`. Zero npm, framework, CDN, or frontend dependencies. Tested in `tests/test_ui.py`.
 - [x] Verify CLI and demo work completely with the panel off; verified core demo passes cleanly twice and test suite reports 148 passed tests across both Python 3.14 and Python 3.12.
 
+### Checkpoint 9 — Stabilization, Security Hardening, and PRD Conformance (completed)
+
+- [x] **Safe Demo & 10-Phase Recovery**: Replaced destructive file and database wipes with `.proofmesh-fixture` validation; implemented full 10-phase recovery loop (`Intent → Baseline → Scope violation/BLOCK → Clean Correction → Verification/Fresh Evidence → ALLOW → Tamper-evident receipt`), while preserving blocked evidence (`report-blocked.md`, `report-blocked.json`).
+- [x] **Trusted Policy Pinning & Scope Scoping**: Eliminated untrusted workspace `policy.toml` injection and gate demotion; pinned deterministic SHA-256 policy digest; scoped session queries by `(project_id, repo_root)` preventing cross-workspace leakage.
+- [x] **Bounded Verification & Freshness**: Added 64KB memory stream drainer and 2000-char summaries; kills timed-out child processes; automatically invalidates evidence if workspace state changes during gate execution.
+- [x] **Hook Path Safety & Honest Status**: Strict path normalization rejecting directory traversal (`..`), NUL bytes, Windows drive/UNC paths, and symlink escapes; write tools missing target paths are denied; defaults integration status honestly to `UNGUARDED` until active enforcement is verified.
+- [x] **MCP Stdio Protocol Cleanliness & Entrypoint**: Added CLI argument entrypoint; reserved `sys.stdout` exclusively for JSON-RPC framing with diagnostics to `sys.stderr`; verified real stdio subprocess roundtrip.
+- [x] **Task Revision & Approval Integrity**: Stripped untrusted self-approval front-matter keys; enforced linear increments (`N + 1`), rejected initial proposals with parent revisions, and guaranteed atomic database approvals.
+- [x] **Read-Only UI Hardening**: Zero database mutations or evaluations on GET; unevaluated sessions return `verdict: null` with deterministic digest; 405 Method Not Allowed on mutating verbs.
+- [x] **Comprehensive Test Verification**: 231 automated tests passing on target CPython 3.14.9; 176 tests passing on host Python 3.12.3. All 15 security audit findings resolved.
+
 ## 3. Separation of concerns
 
 Keep these boundaries, but create modules only when there is working behavior behind them.
