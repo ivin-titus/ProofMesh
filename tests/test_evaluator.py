@@ -2,6 +2,8 @@
 
 from datetime import datetime, timedelta, timezone
 
+from proofmesh.config import compute_policy_digest
+from proofmesh.core.verification import compute_gate_digest
 from proofmesh.core.evaluator import evaluate_session
 from proofmesh.core.handoff import generate_handoff
 from proofmesh.core.loop_detector import LoopDetector
@@ -34,7 +36,27 @@ SAMPLE_DIGEST = "sha256:" + "a" * 64
 SAMPLE_SNAP_0 = "sha256:" + "0" * 64
 SAMPLE_SNAP_1 = "sha256:" + "1" * 64
 SAMPLE_SNAP_2 = "sha256:" + "2" * 64
-SAMPLE_SNAP_1_ID = SAMPLE_SNAP_1.replace("sha256:", "snap-")[:63]
+SAMPLE_SNAP_1_ID = SAMPLE_SNAP_1
+
+
+def make_test_policy() -> TrustedPolicy:
+    return TrustedPolicy(
+        profile=OperatingProfile.FLOW,
+        budget=BudgetPolicy(max_retries=3),
+        gates={
+            "test-gate": GatePolicy(
+                provider="pytest",
+                command=("pytest",),
+                timeout_seconds=30,
+                mandatory=True,
+            )
+        },
+    )
+
+
+DEFAULT_TEST_POLICY = make_test_policy()
+DEFAULT_POLICY_DIGEST = compute_policy_digest(DEFAULT_TEST_POLICY)
+DEFAULT_GATE_DIGEST = compute_gate_digest(DEFAULT_TEST_POLICY.gates["test-gate"])
 
 
 def make_test_session(
@@ -42,6 +64,7 @@ def make_test_session(
     task_id: str = "task-01",
     revision: int = 1,
     integration_status: IntegrationStatus = IntegrationStatus.ENFORCED,
+    policy_digest: str = DEFAULT_POLICY_DIGEST,
 ) -> Session:
     now = datetime.now(timezone.utc)
     return Session(
@@ -52,7 +75,7 @@ def make_test_session(
         baseline_snapshot_id="snap-0",
         current_snapshot_id="snap-1",
         profile=OperatingProfile.FLOW,
-        policy_digest=SAMPLE_DIGEST,
+        policy_digest=policy_digest,
         integration_status=integration_status,
         state=SessionState.ACTIVE,
         started_at=now,
@@ -175,7 +198,7 @@ def make_test_evidence(
         acceptance_criteria=("AC-1",),
         provider_name="pytest-runner",
         provider_version="9.1.1",
-        config_digest=SAMPLE_DIGEST,
+        config_digest=DEFAULT_GATE_DIGEST,
         started_at=end - timedelta(seconds=2),
         ended_at=end,
         duration_ms=2000,
@@ -184,21 +207,6 @@ def make_test_evidence(
         status=status,
         exit_code=exit_code,
         summary=summary,
-    )
-
-
-def make_test_policy() -> TrustedPolicy:
-    return TrustedPolicy(
-        profile=OperatingProfile.FLOW,
-        budget=BudgetPolicy(max_retries=3),
-        gates={
-            "test-gate": GatePolicy(
-                provider="pytest",
-                command=("pytest",),
-                timeout_seconds=30,
-                mandatory=True,
-            )
-        },
     )
 
 
@@ -582,11 +590,11 @@ def test_generate_handoff_block_card():
 
 def test_evaluate_session_no_required_gates_scope_clean():
     """Task revision with no required gates and policy with no mandatory gates evaluates to ALLOW."""
-    session = make_test_session()
+    policy = make_test_policy().model_copy(update={"gates": {}})
+    session = make_test_session(policy_digest=compute_policy_digest(policy))
     task = make_test_task_revision(required_gates=())
     snapshot = make_test_snapshot(SAMPLE_SNAP_1)
     scope = make_clean_scope_result()
-    policy = make_test_policy().model_copy(update={"gates": {}})
 
     verdict = evaluate_session(
         session=session,
@@ -654,11 +662,11 @@ def test_evaluate_session_exceeded_file_limit():
 
 def test_evaluate_session_multiple_fresh_gates_preserves_evidence_ids():
     """When multiple mandatory gates pass, all evidence IDs are collected in the verdict."""
-    session = make_test_session()
+    policy = make_test_policy().model_copy(update={"gates": {}})
+    session = make_test_session(policy_digest=compute_policy_digest(policy))
     task = make_test_task_revision(required_gates=("gate-1", "gate-2"))
     snapshot = make_test_snapshot(SAMPLE_SNAP_1)
     scope = make_clean_scope_result()
-    policy = make_test_policy().model_copy(update={"gates": {}})
 
     ev1 = make_test_evidence(
         evidence_id="ev-01",

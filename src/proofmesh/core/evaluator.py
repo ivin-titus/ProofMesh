@@ -34,12 +34,7 @@ def _is_snapshot_fresh(evidence_snapshot: str, current_snapshot_id: str) -> bool
 
     Requires exact equality between evidence.snapshot_after and current_snapshot.snapshot_id.
     """
-    if evidence_snapshot == current_snapshot_id:
-        return True
-    # Compatibility with legacy Wave 1 mock fixture SAMPLE_SNAP_1_ID
-    if evidence_snapshot == "snap-" + "1" * 58 and current_snapshot_id == "sha256:" + "1" * 64:
-        return True
-    return False
+    return evidence_snapshot == current_snapshot_id
 
 
 def evaluate_session(
@@ -89,13 +84,10 @@ def evaluate_session(
         effective_policy_digest if effective_policy_digest is not None else computed_digest
     )
     if session.policy_digest != target_digest:
-        hex_part = session.policy_digest.removeprefix("sha256:")
-        is_mock_placeholder = len(hex_part) == 64 and len(set(hex_part)) == 1 and effective_policy_digest is None
-        if not is_mock_placeholder:
-            verdict = VerdictOutcome.BLOCK
-            reasons.append(
-                f"Policy digest mismatch: session pinned to '{session.policy_digest}', but effective policy digest is '{target_digest}'"
-            )
+        verdict = VerdictOutcome.BLOCK
+        reasons.append(
+            f"Policy digest mismatch: session pinned to '{session.policy_digest}', but effective policy digest is '{target_digest}'"
+        )
 
     # 3. Scope Checks
     if scope_result.has_violations:
@@ -141,15 +133,10 @@ def evaluate_session(
             if gate in policy.gates:
                 expected_config = compute_gate_digest(policy.gates[gate])
                 if latest.config_digest != expected_config:
-                    is_legacy = (
-                        latest.config_digest in ("sha256:" + "a" * 64, "sha256:" + "0" * 64)
-                        and session.policy_digest in ("sha256:" + "a" * 64, "sha256:" + "0" * 64)
+                    reasons.append(
+                        f"Gate '{gate}' configuration digest '{latest.config_digest}' does not match policy digest '{expected_config}'"
                     )
-                    if not is_legacy:
-                        reasons.append(
-                            f"Gate '{gate}' configuration digest '{latest.config_digest}' does not match policy digest '{expected_config}'"
-                        )
-                        verdict = VerdictOutcome.BLOCK
+                    verdict = VerdictOutcome.BLOCK
 
             if latest.status != EvidenceStatus.PASSED:
                 reasons.append(

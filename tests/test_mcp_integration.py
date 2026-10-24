@@ -101,21 +101,6 @@ def test_env(tmp_path: Path):
     store.save_snapshot(baseline_snap)
 
     # Active session
-    session = Session(
-        session_id="sess-integration-test-1",
-        task_id=task_rev.task_id,
-        contract_revision=task_rev.revision,
-        repo_root=str(repo_root),
-        baseline_snapshot_id=baseline_snap.snapshot_id,
-        current_snapshot_id=baseline_snap.snapshot_id,
-        profile=OperatingProfile.FLOW,
-        policy_digest="sha256:" + "b" * 64,
-        integration_status=IntegrationStatus.ENFORCED,
-        state=SessionState.ACTIVE,
-        started_at=datetime.now(timezone.utc),
-    )
-    store.save_session(session)
-
     # Trusted policy with allowlisted gate
     policy = TrustedPolicy(
         schema_version=1,
@@ -135,6 +120,22 @@ def test_env(tmp_path: Path):
             ),
         },
     )
+    policy_digest = compute_policy_digest(policy)
+
+    session = Session(
+        session_id="sess-integration-test-1",
+        task_id=task_rev.task_id,
+        contract_revision=task_rev.revision,
+        repo_root=str(repo_root),
+        baseline_snapshot_id=baseline_snap.snapshot_id,
+        current_snapshot_id=baseline_snap.snapshot_id,
+        profile=OperatingProfile.FLOW,
+        policy_digest=policy_digest,
+        integration_status=IntegrationStatus.ENFORCED,
+        state=SessionState.ACTIVE,
+        started_at=datetime.now(timezone.utc),
+    )
+    store.save_session(session)
 
     return {
         "repo_root": repo_root,

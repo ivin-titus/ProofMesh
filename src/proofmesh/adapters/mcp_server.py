@@ -199,14 +199,6 @@ def create_mcp_server(
 
     def _check_policy_digest(sess: Session) -> str | None:
         """Return error message if session policy digest does not match effective policy digest."""
-        # Backward compatibility for legacy test fixture dummy digest ("sha256:" + "b" * 64)
-        if (
-            sess.policy_digest == "sha256:" + "b" * 64
-            and policy is not None
-            and policy_digest is None
-        ):
-            return None
-
         if sess.policy_digest != effective_policy_digest:
             return (
                 f"Policy digest mismatch: session was started under policy digest '{sess.policy_digest}', "
