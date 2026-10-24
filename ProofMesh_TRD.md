@@ -422,6 +422,21 @@ ProofMesh must work beyond "add a feature". The first real user is a social medi
 
 Long refactors are a series of small TaskFiles, each with its own invariants and acceptance; the handoff packet carries context from one to the next.
 
+During a refactor, **invariant tests are protected**: editing or deleting them is a weakening change and needs approval (§6.1). The agent must change the code to fit the tests, not the reverse.
+
+### 6.3 Test obligations: proper tests with every change
+
+The project already has test scripts. ProofMesh makes writing proper tests part of "done" instead of a request the agent can ignore. Rules live in trusted policy (`[tests]` in `policy.toml`) and are checked deterministically:
+
+1. **Tests must accompany code.** A mapping such as `"src/feed/**" = "tests/feed/**"` says which tests cover which code. If mapped source files change but no test in the mapped paths was added or changed, the verdict is `BLOCK` with "missing tests for src/feed/…". Refactors with unchanged behaviour can satisfy this through invariant gates instead.
+2. **New tests must actually run.** Gate results are read from JUnit XML (pytest, Jest, Vitest and most runners can emit it). Tests from added/changed test files must appear in the results and not be skipped.
+3. **New tests must test something.** For `bugfix` (always) and `feature` (policy option `require_fail_on_baseline`), the new/changed tests are run once against the baseline code in a temporary `git worktree`. At least one must fail there and pass on the current code. A test that passes on both did not prove the change.
+4. **No test weakening.** Compared with the baseline: fewer tests collected, deleted test files, newly added skip/only markers (configurable patterns, e.g. `@pytest.mark.skip`, `.skip(`, `.only(`, `xit(`), or edits to protected tests → weakening → `REQUIRE_APPROVAL`.
+5. **Optional diff coverage:** a configured command (e.g. `diff-cover`) with a threshold, run as a normal gate.
+
+These rules are evidence like any other: tied to the snapshot, marked stale on change, shown in reports with the exact files and tests involved.
+
+
 ## 7. Repository snapshot and scope analysis
 
 ### 7.1 Snapshot strategy
@@ -589,7 +604,7 @@ Initial targets (from current official docs; validate exact schemas against the 
 |---|---|---|---|---|---|
 | Codex | yes | `SessionStart`, `PreToolUse`, `PostToolUse`, `Stop`, `SubagentStop`, `UserPromptSubmit` | yes (`permissionDecision: deny`) | yes (`Stop` → `{"decision":"block","reason":…}`; `stop_hook_active` flag) | command hook |
 | Claude Code | yes | `SessionStart`, `PreToolUse`, `PostToolUse`, `Stop`, `SubagentStop`, `TaskCompleted`, … | yes | yes (`Stop` decision control) | command hook |
-| Google Antigravity (App / CLI / IDE) | yes | `SessionStart`, `PreToolUse`, `PostToolUse`, `PreInvocation`, `PostInvocation`, `Stop` | yes (`deny`; also `ask`/`force_ask` for human approval) | via `PostInvocation` `terminationBehavior: "force_continue"`; `Stop` continuation semantics to verify | command hook |
+| Google Antigravity (App / CLI / IDE) — **primary** | yes | `SessionStart`, `PreToolUse`, `PostToolUse`, `PreInvocation`, `PostInvocation`, `Stop` | yes (`deny`; also `ask`/`force_ask` for human approval) | yes (`Stop` → `{"decision":"continue","reason":…}`) | command hook (§13.3) |
 | OpenCode | yes | plugin events: `tool.execute.before`, `tool.execute.after`, `session.idle`, `session.diff`, … | yes (from `tool.execute.before`) | to verify (`session.idle` looks notification-only) | tiny TS plugin that shells out to `proofmesh hook` |
 | Any other MCP-capable tool | yes | none | no | no | MCP only → `PARTIAL`/`UNGUARDED` |
 
@@ -604,9 +619,31 @@ Loop safety for every host: honour host loop flags (e.g. Codex `stop_hook_active
 
 `proofmesh integrate <host>` prints the exact config snippet (MCP server entry + hook entries) for that host; `--write` applies it only after showing a diff. The enforcement report shows, per host, which capabilities are active.
 
-**Demo host:** one host is shown end-to-end with hooks (choose the one most reliable to record; CLI-based Codex or Claude Code are the simplest to script). A second host can be shown in MCP + hooks mode to prove neutrality if time allows.
+**Demo host: Google Antigravity** (the developer's daily tool, used with smaller/weaker models). Other hosts are supported through the same protocol and golden-file tests; they are not part of the recorded demo unless time allows.
 
-### 13.3 Enforcement caveat
+### 13.3 Antigravity adapter (primary)
+
+Antigravity's hooks work the same in the App, CLI and IDE: `hooks.json` maps hook names to events; each handler is a shell command that gets camelCase JSON on stdin and returns JSON on stdout (default timeout 30 s). Every payload carries `conversationId`, `workspacePaths`, `transcriptPath`, `artifactDirectoryPath` and `modelName`. Source: https://antigravity.google/docs/hooks (validate against the installed version).
+
+| Antigravity event | ProofMesh action | Output |
+|---|---|---|
+| `SessionStart` | register session (keyed by `conversationId`), baseline snapshot + baseline gates, load the approved contract | `injectSteps: [{systemMessage: <compact contract>}]` |
+| `PreInvocation` | build a **short** reminder: objective, current blockers, next required evidence (≤ ~600 chars) | `injectSteps: [{ephemeralMessage: …}]` |
+| `PreToolUse` on `write_to_file`, `replace_file_content`, `multi_replace_file_content` | check `TargetFile` against scope, protected paths and protected tests | `allow`, `deny` + reason, or `ask`/`force_ask` per profile (§6.1) |
+| `PreToolUse` on `run_command` | flag commands that obviously edit protected files or skip checks (e.g. `git checkout -- tests/`, `rm` on tests); cannot parse arbitrary shell reliably | `allow` or `ask` with reason; never claims full coverage |
+| `PostToolUse` | record event; on write tools or `run_command`, recompute changed paths from the snapshot and mark evidence stale | `{}` |
+| `Stop` (`fullyIdle: true`) | evaluate completion | `{"decision":"continue","reason":<focused missing-evidence message>}` while budget remains; otherwise allow stop, task stays non-accepted, handoff written |
+
+Notes:
+
+- **Weaker models** drift on large changes and ignore long rule files (AGENTS.md). ProofMesh keeps injected text short and specific, blocks rule-breaking writes at the moment they happen, and turns the stop event into "not done: X is missing", with exact gate and file names.
+- **No host loop flag** on `Stop` (unlike Codex `stop_hook_active`). Loop safety relies on ProofMesh's own continuation budget per contract revision and snapshot, plus no-progress detection.
+- **Never use `overwrite`** (argument rewriting). ProofMesh allows, denies or asks; it does not silently change what the agent does.
+- **Hook config is inside the workspace** (`.agents/hooks.json`). `proofmesh integrate antigravity` installs hooks in the **global** `~/.gemini/config/hooks.json` by default, and ProofMesh treats `.agents/hooks.json`, `.agents/mcp_config.json` and its own policy as protected paths. A changed hook config at runtime drops enforcement health to `UNGUARDED` and shows in the report.
+- Shell commands (`run_command`) can still change files without a write tool. The snapshot diff after each tool call catches these after the fact; this is detection, not prevention, and the report says so.
+- MCP: same stdio server, registered in `~/.gemini/config/mcp_config.json` (global) or `.agents/mcp_config.json` (workspace) with `command`/`args`.
+
+### 13.4 Enforcement caveat
 
 MCP-only mode is advisory. A lifecycle hook can request continuation only to the extent the host supports and honors it. Git/CI gates can enforce merge policy independently. A local agent can still claim completion in chat; ProofMesh governs its own acceptance state, not arbitrary text in the host conversation.
 
@@ -720,6 +757,8 @@ Exact syntax is implementation-flexible. Return meaningful exit codes: `0` accep
 - Storage: migrations apply in order and are idempotent; concurrent writers (two processes) do not lose writes; hash-chain verification detects a modified row; `quick_check` failure blocks start-up; backup/restore round-trips; no query uses string-formatted SQL (lint rule/grep test).
 - Decision matrix: each (decision, profile) cell in §6.1 behaves as specified; no profile turns a failed mandatory gate into `ACCEPTED`; waivers are labelled.
 - Baseline-relative evidence: pass→fail is a regression; fail→fail is reported as pre-existing; `bugfix` tasks without a fail-to-pass gate cannot be accepted; `refactor` tasks require `## Invariants`.
+- Test obligations: missing mapped tests → `BLOCK`; skipped/absent new tests detected from JUnit XML; fail-on-baseline check via temporary worktree; test-count drop, deleted tests and new skip/only markers → `REQUIRE_APPROVAL`.
+- Antigravity adapter: golden files for every event (doc examples + payloads captured from the installed version); `Stop` continuation respects the budget; protected hook-config edits are denied and drop enforcement health.
 - Host adapters: recorded sample payloads for each supported host map to the same `HookEvent`; `HookDecision` maps back to valid host output (golden-file tests).
 - TaskFile ownership: agent `propose_task`/`propose_contract_amendment` never produces an approved revision without a policy rule or user approval; scope expansion is escalated; rejected proposals return reasons.
 
@@ -747,7 +786,7 @@ Use a prepared repository and a known task. The test must not require an LLM to 
 5. Loop/retry detector and handoff packet.
 6. CLI end-to-end flow.
 7. MCP tools backed by the same core.
-8. Host-neutral hook protocol + one demo host end-to-end, enforcement-health report; then other host mappings (golden-file tested) as time allows.
+8. Host-neutral hook protocol + Antigravity adapter end-to-end, enforcement-health report; then other host mappings (golden-file tested) as time allows.
 9. Optional small UI and Playwright smoke check only if the end-to-end path is already reliable.
 
 If time slips, cut dashboard breadth and optional browser automation before cutting contract integrity, evidence freshness, runtime validation, or the working hook.
@@ -805,7 +844,7 @@ The submission will be evaluated by human judges and an AI agent that reviews th
 - **Green CI:** ruff, pyright (strict) and pytest run on every push; badge in README.
 - **Tests as documentation:** test names read as requirements (`test_failed_mandatory_gate_blocks_acceptance`, `test_agent_cannot_approve_own_amendment`).
 - **Traceability:** README links PRD requirement IDs (FR-xx) to tests; the decision log (§23) shows reasoning for reviewers.
-- **Real-world use:** if possible, show ProofMesh governing a real refactor step on the social media app (a short recording or report), next to the seeded demo.
+- **Real-world use:** the demo runs on the developer's real social media app in Antigravity. Keep a recorded run and its exported reports as a fallback, because a live agent may not misbehave on cue.
 - **Security hygiene visible in code:** parameterized SQL, no `shell=True`, allowlisted gates, strict Pydantic models at boundaries.
 
 ## 23. Ideation log and open questions
@@ -825,13 +864,16 @@ Decisions taken during ideation (branch `devin/ideation`):
 - **D-11** Agent-neutral integration: MCP everywhere + thin hook mappings for Codex, Claude Code, Google Antigravity and OpenCode (§13.2).
 - **D-12** Refactors and bugfixes are first-class task kinds with baseline-relative evidence; first real user is a social media app refactor (§6.2).
 - **D-13** Keep it simple but high-impact for the demo.
+- **D-14** Primary demo host is Google Antigravity (used with smaller models); other hosts stay supported via the same protocol (§13.3).
+- **D-15** The demo uses the developer's real social media app during its refactor. Pitch: AGENTS.md is advice agents ignore; ProofMesh turns the same rules into checks and hooks.
+- **D-16** ProofMesh enforces test obligations: tests with every change, new tests must run and fail on baseline, no test weakening (§6.3).
 
 Open questions:
 
-1. **Demo host:** which host to record end-to-end (Codex, Claude Code, Antigravity, OpenCode)?
-2. **Demo scenario:** the PRD §15 refactor scenario (messy mini social-feed app → layered) — confirm, or use a slice of the real social media app?
-3. **Social media app stack:** languages/frameworks determine which boundary tool (`import-linter`, `dependency-cruiser`, …) and test commands the gates use.
+1. **Social media app stack:** languages, frameworks, test runner (does it emit JUnit XML?), and whether ProofMesh config can be prepared against a copy of the repo.
+2. **Architecture rules:** the concrete rules agents keep breaking (e.g. "UI never imports the DB layer") → these become the boundary gate config.
+3. **Antigravity surface:** App, IDE or CLI for the recording (hooks behave the same; config paths differ slightly).
 4. **TaskFile grammar details:** exact AC/invariant/assumption line syntax.
 5. **Digest normalization:** which Markdown changes count as "cosmetic" vs. intent changes.
-6. **Checks that write files:** redirect caches to `/tmp` per tool vs. run checks on a temporary worktree.
-7. **Baseline gate cost:** running all required gates at session start doubles check time; allow reusing a recent baseline result for the same snapshot?
+6. **Checks that write files:** redirect caches per tool vs. run checks on a temporary worktree.
+7. **Check cost:** baseline gates at session start plus fail-on-baseline runs add time; allow reusing results for an unchanged snapshot?

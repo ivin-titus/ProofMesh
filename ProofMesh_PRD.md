@@ -39,6 +39,8 @@ Testing, code review, agent governance, MCP tooling, and lifecycle hooks exist i
 
 **Role: project manager for task intent.** ProofMesh owns the task contract, scope and acceptance decisions. Agents can propose tasks and amendments; ProofMesh decides whether to reject, accept under policy, or escalate to the user. It does not write code, plan the implementation, or schedule agents.
 
+**Rules files vs enforcement:** AGENTS.md and similar files are advice; agents, especially smaller models on large changes, ignore them. ProofMesh turns the same rules into deterministic checks, write-time hook decisions and acceptance verdicts.
+
 **Differentiation to demonstrate:** continuity of task intent and verification evidence across code changes and agent handoffs—not merely a browser tester, generic code reviewer, agent router, or pass/fail test runner.
 
 This is a product hypothesis, not a claim that the overall category or any individual capability is unprecedented.
@@ -193,7 +195,7 @@ Priority definitions: **P0** = necessary for the hackathon end-to-end demo; **P1
 | FR-06 | P0 | Evaluate completion | Return a deterministic verdict from contract, evidence, policy, and integration health. |
 | FR-07 | P0 | Detect repeated failure | Detect repeated normalized failures or no progress; stop automatic retries after a configurable budget. |
 | FR-08 | P0 | Expose core through MCP | A compatible agent can read the contract, inspect changes, run configured verification, retrieve status and request a handoff. |
-| FR-09 | P0 | Integrate one lifecycle hook (demo host) | A supported hook records an event and checks completion status; continuation is bounded and documented. |
+| FR-09 | P0 | Integrate Google Antigravity hooks (demo host) | A supported hook records an event and checks completion status; continuation is bounded and documented. |
 | FR-10 | P0 | Show enforcement coverage | Report `ENFORCED`, `PARTIAL`, or `UNGUARDED` based on adapter capabilities and health. |
 | FR-11 | P0 | Generate a compact handoff | Include objective, contract revision, changed paths, current code state, failed checks, prior attempts, unresolved assumptions and required next action. |
 | FR-12 | P1 | Trigger browser verification on UI changes | If a configured UI path changes, run a configured Playwright smoke test or explicitly report UI verification unavailable. |
@@ -206,6 +208,7 @@ Priority definitions: **P0** = necessary for the hackathon end-to-end demo; **P1
 | FR-20 | P0 | Mode-based human approvals | Critical decisions are queued for the developer per the profile matrix; agents cannot approve; waivers are explicit and labelled in reports. |
 | FR-21 | P0 | Task kinds with baseline-relative evidence | `feature`, `bugfix` (requires a fail-to-pass gate) and `refactor` (requires invariants; pass → fail is a regression) are supported. |
 | FR-22 | P1 | Multiple host adapters | Codex, Claude Code, Google Antigravity and OpenCode map to one hook protocol (golden-file tested); other MCP tools work in advisory mode. |
+| FR-23 | P0 | Test obligations | Mapped code changes require test changes; new tests must run, and (bugfix / opted-in features) fail on baseline; test deletion, skips and count drops need approval. |
 | FR-19 | P0 | Review-ready submission | One-command offline demo produces Markdown + JSON reports; README claims map to code and tests; CI is green. |
 
 ## 10. Quality gates
@@ -293,19 +296,19 @@ Do not claim quality improvement from these metrics until they are measured agai
 
 ## 15. Demo narrative
 
-Keep it simple, make it land. Proposed scenario (to confirm): a small, deliberately messy "vibe-coded" social-feed app (FastAPI, one tangled module mixing HTTP, business logic and SQL, plus an existing test suite). This mirrors ProofMesh's first real use: simplifying an over-engineered social media app.
+The demo uses the developer's **real social media app**, which is mid-refactor: a vibe-coded, over-engineered codebase being simplified into something boring with clear layers. The agent is **Google Antigravity** with a smaller model, which is exactly where agents break architecture rules on large changes and ignore AGENTS.md.
 
-1. **Refactor task:** the developer approves a `refactor` TaskFile: split into routes / services / repository layers; invariants = existing API tests; boundary rule = routes must not import the database layer; migrations are restricted.
-2. ProofMesh runs **baseline gates** at session start and records pre-existing results.
-3. A real coding agent (demo host) starts working.
-4. **Scope:** a seeded edit to a migration file is caught (`RESTRICTED`) and escalated for approval.
-5. **Architecture:** the boundary gate fails (a route still imports the DB layer) → `BLOCKED`, with a focused intervention.
-6. **Loop:** the same failure repeats → automatic retries stop at the budget; a compact handoff is produced.
-7. **Freshness:** a passing run is followed by another edit → evidence becomes `STALE`.
-8. Fix, re-run: invariants show no pass → fail; boundary gate passes; simplification metrics show the change → `ACCEPTED` (confirmed by the developer per profile). Show the enforcement coverage report.
-9. (Optional, short) **Bugfix task:** a test fails on baseline and passes after the fix, proving fail-to-pass evidence.
+1. **Contract:** the developer approves a `refactor` TaskFile for one real refactor step: target structure, invariants (existing tests), architecture rules as a boundary gate, restricted paths, test obligations.
+2. **Baseline:** ProofMesh records baseline gate results, including pre-existing failures.
+3. **Agent works** in Antigravity; ProofMesh injects a short contract reminder.
+4. **Write-time block:** the agent tries to edit a restricted file or a protected test → `PreToolUse` denies or asks the developer.
+5. **Architecture:** the boundary gate catches a layer violation → `BLOCKED`, with the exact import named.
+6. **Tests:** code changed without tests, or a new test that also passes on the old code → "not done" with the missing evidence.
+7. **Stop hook:** the agent says "done" → ProofMesh replies `continue: <what is missing>`; after the budget, retries stop and a handoff is written.
+8. **Freshness:** a later edit makes earlier passing evidence `STALE`.
+9. **Accepted:** invariants show no regression, boundary gate and test obligations pass, simplification metrics shown → developer confirms → `ACCEPTED`. Show the enforcement coverage report.
 
-Use deterministic seeded cases so the demonstration does not depend on an LLM making a specific mistake on demand. Label scripted or replayed multi-agent events as simulations; do not imply the system observed a real subagent if it did not.
+Because a live agent may not misbehave on cue, keep a recorded run and its exported reports as backup. Label any replayed or seeded events as such.
 
 ## 16. Roadmap
 
@@ -326,7 +329,7 @@ Use deterministic seeded cases so the demonstration does not depend on an LLM ma
 - The MVP does not provide formal correctness proofs.
 - User approval can be represented by an explicit local CLI/UI action plus a contract digest; cryptographic identity is future work.
 - A completion hook may request continuation but cannot guarantee that the agent will obey forever or prevent a separate chat message claiming completion.
-- ProofMesh targets any MCP + hooks tool; Codex, Claude Code, Google Antigravity and OpenCode are the initial hook targets. One of them is shown end-to-end in the demo.
+- ProofMesh targets any MCP + hooks tool; Codex, Claude Code, Google Antigravity and OpenCode are the initial hook targets. Google Antigravity is the demo host.
 
 ## 18. Reference links
 
