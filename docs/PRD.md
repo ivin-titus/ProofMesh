@@ -128,7 +128,7 @@ Do not make these prerequisites for the hackathon demo:
 
 **Hackathon core (must ship):** TaskFile approval and revision integrity; Git snapshot/scope report; one allowlisted check runner; evidence freshness; deterministic verdict; bounded repeated-failure detection; compact handoff; MCP access; one real host integration; persistent local state; readable/JSON report.
 
-**Stretch only after the end-to-end flow passes repeatedly:** one existing Playwright smoke test for a UI-affecting change OR one optional decision-advisor call for a narrowly typed question. Do not attempt both unless there is clear spare time. The decision advisor may only add a warning or request review; it must never approve work or override deterministic gates.
+**Stretch only after the end-to-end flow passes at least twice from a clean state:** choose at most one of (1) a minimal read-only local progress panel, (2) one existing Playwright smoke test for a UI-affecting change, or (3) one optional SystemOne decision-advisor call for a narrowly typed question. Basic plain-text CLI progress and Markdown/JSON receipts are part of the core demo. The panel is off by default, explicitly started, loopback-only, and uses vanilla HTML/CSS/JS without a frontend build chain. The advisor may only warn or request review; it must never approve work or override deterministic gates.
 
 **Long-term vision:** additional host adapters, stronger write-time controls, CI/merge gates, decision-model integrations, richer API/database/log/browser verification, multi-agent handoffs, stepwise refactors, test-quality analysis, policy packs, and a verification-plugin ecosystem. The architecture should leave room for these without requiring them now.
 
@@ -233,7 +233,8 @@ Priority definitions: **P0 — build now**; **P1 — stretch after the end-to-en
 | FR-21 | Future | Advanced test obligations and test-quality checks | Detect missing/weak tests, test deletion/skips and fail-on-baseline bugs with explicit handling for flaky or inconclusive results. |
 | FR-22 | Future | Project auto-initialization and architecture rules | Detect stacks without executing repository code, propose a policy for approval, and add language-specific rule providers. |
 | FR-23 | Future | Stepwise refactors and change budgets | Unlock ordered refactor steps only after verification; require approval when a configured change budget is exceeded. |
-| FR-24 | Future | Team policy packs and verification plugin ecosystem | Add typed verification providers and reusable repository policies without changing the core evaluator.
+| FR-24 | Future | Team policy packs and verification plugin ecosystem | Add typed verification providers and reusable repository policies without changing the core evaluator. |
+| FR-25 | P1 — stretch | Optional local progress panel | When selected after the core demo is reliable, an explicit command starts a read-only vanilla HTML/CSS/JS panel on loopback; it displays the same persisted task/status/evidence/verdict data as CLI/reports, contains no policy logic, requires no frontend build/runtime dependency, and can be stopped without affecting the core. |
 
 ## 10. Quality gates
 
@@ -296,8 +297,10 @@ The report should show a timeline, scope findings, gate outcomes, intervention c
 
 ### Stretch indicators
 
-- One existing Playwright smoke test captures a meaningful UI assertion.
+- A minimal local read-only progress panel makes the current task, gate, evidence and verdict states visible without changing the core or adding frontend build dependencies.
+- OR one existing Playwright smoke test captures a meaningful UI assertion.
 - OR one optional decision-advisor call improves a narrowly scoped warning/question while deterministic policy remains authoritative.
+- These are alternatives: choose at most one after the core scenario passes twice.
 - A compact handoff is reused by a second agent or fresh session without losing contract and failure context.
 
 ### Future product metrics (measure before making claims)
@@ -343,9 +346,9 @@ Use a prepared sample repository with an intentional scope/verification failure.
 
 ### Optional live extension
 
-If the core is stable, run one of the same checks against the developer's real social-media project through the host selected and verified in the integration spike. Antigravity is a candidate, not a prerequisite. Then choose **one** stretch feature: a Playwright UI smoke test or a narrow decision-advisor call. Do not depend on the real repository or a live model making a particular mistake for the main story.
+If the core is stable, run one of the same checks against the developer's real social-media project through the host selected and verified in the integration spike. Antigravity is a candidate, not a prerequisite. Then choose **at most one** stretch feature: a minimal local read-only progress panel, an existing Playwright UI smoke test, or a narrow SystemOne decision-advisor call. Do not depend on the real repository or a live model making a particular mistake for the main story.
 
-Keep a recorded run and exported reports as backup; label any seeded/replayed events. The decision model, if shown, is advisory only and must never replace the deterministic verdict.
+Keep a recorded run and exported reports as backup; label any seeded/replayed events. The decision model, if shown, is advisory only and must never replace the deterministic verdict. Any advisor key must be supplied through an environment variable, never stored in the task, database, logs, report or UI.
 
 ## 16. Roadmap
 

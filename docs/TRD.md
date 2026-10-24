@@ -28,17 +28,22 @@ This section is authoritative for implementation priority. The remainder of this
 - Universal plugin installer and multiple host hook adapters.
 - GitHub Actions/PR comments and remote merge gating.
 - Stepwise refactor orchestration/change budgets, advanced test-obligation enforcement, comprehensive architecture analysis, and mutation testing.
-- Dashboard polish and a new browser automation engine.
+- A full dashboard/IDE and a new browser automation engine. A minimal read-only local status panel is allowed only as the single optional presentation stretch below.
 - Multi-worktree/multi-agent orchestration or guaranteed subagent attribution.
 - Required hosted/local decision model.
 
-### Stretch choice
+### Presentation and stretch choice
 
-Only after the must-build flow succeeds at least twice from a clean state, choose at most one:
-1. an existing Playwright smoke test tied to a UI-affecting change; or
-2. one optional decision-advisor call for a narrow typed question.
+Basic, plain terminal progress markers plus the Markdown/JSON receipt are part of the demo path, not a stretch. Show concise phase changes and actual persisted outcomes; do not add a heavy TUI framework.
 
-The advisor may only add a warning or request review. It must never approve a task or override deterministic policy. If it needs a new account, paid service, large model download, or significant debugging, skip it.
+Only after the must-build flow succeeds at least twice from a clean state, choose **at most one** optional stretch:
+1. A minimal read-only local progress panel using vanilla HTML/CSS/JS and Python's standard-library HTTP server.
+2. An existing Playwright smoke test tied to a UI-affecting change.
+3. One optional SystemOne decision-advisor call for a narrow typed question.
+
+For the panel: it is launched explicitly (planned command: `proofmesh ui`), off by default, bound only to `127.0.0.1`, read-only, and consumes the same versioned status/report data as the CLI. It must not run policy logic or become necessary for the core flow. No npm build chain, framework, CDN, or separate frontend runtime dependency. Stop it with Ctrl+C and verify that the core demo works with it disabled.
+
+For the advisor: it may only add a warning or request review. It must never approve a task or override deterministic policy. If it needs a new account, paid service, large model download, or significant debugging, skip it. Credentials may come only from a trusted configuration's environment-variable name (for example `PROOFMESH_ADVISOR_KEY`), never from a committed value, database field, report or UI. A remote endpoint should receive only the narrow data needed for the typed question, not full transcripts or repository contents by default.
 
 ### Data integrity is not a stretch feature
 
@@ -75,11 +80,12 @@ Guiding rule: **minimal dependencies**. Every third-party package must earn its 
 - **Persistence:** SQLite only, via the standard-library `sqlite3` module with hand-written, parameterized SQL. No ORM, no query builder, no migration framework. Database file lives in a protected per-user data directory outside the workspace (see §14).
 - **MCP:** official MCP Python SDK; pin the SDK version in the lock file and use stable, commonly supported tool primitives.
 - **CLI:** `argparse` (standard library).
+- **Terminal feedback:** concise plain-text progress/status lines for the seeded demo and CLI workflows; no heavy TUI framework.
 - **Repository observation:** Git CLI plus filesystem fingerprints for untracked files.
 - **Checks:** subprocess runner invoking allowlisted commands such as `pytest`, `ruff`, type checks, or a project-specific test script.
 - **Packaging/runtime:** a normal Python package managed with `uv` (`uv.lock` committed); installed with `uv tool install proofmesh` or run with `uvx proofmesh`. No Docker in the runtime path (decision and rationale in §3.1).
 - **Dev tooling (not shipped):** pytest, ruff, pyright (strict) — enforced in CI.
-- **Optional UI:** minimal local web dashboard only after the core end-to-end flow works. A terminal report is acceptable for MVP.
+- **Optional UI:** only the minimal read-only local status panel defined in §0, and only if selected as the single stretch after the core demo passes twice. Use vanilla HTML/CSS/JS, Python's standard-library HTTP server, an explicit `proofmesh ui` command, loopback binding, and the same status/receipt contract as the CLI. The CLI and core remain fully usable with the panel off.
 - **Optional UI verification:** existing Playwright test/script; do not build a browser automation engine.
 
 ### Protocol stance
@@ -819,7 +825,7 @@ timeout_ms = 2000
 3. **Recorded as advisory evidence.** Each answer is stored with the question, the advisor URL/model, the probability and the threshold used, labelled `ADVISORY` in reports.
 4. **Thresholds are trusted policy.** The developer sets the threshold per question; ProofMesh compares the probability deterministically.
 5. **Off the hot path.** Never called from `PreToolUse`/`PostToolUse`. Only at Stop, in `proofmesh verify --ci`, or on demand (`proofmesh review`).
-6. **No code or task text leaves the machine** unless the developer points `url` at a remote endpoint; `proofmesh doctor` shows where advisor calls go.
+6. **Explicit data/credential boundary.** A credential is read only from the environment variable named by trusted config (e.g. `PROOFMESH_ADVISOR_KEY`); never store the actual key in TOML, SQLite, event payloads, logs, error messages, reports, browser data or Git. A missing key or provider failure must leave deterministic policy unchanged. No code or task text leaves the machine unless the developer configures a remote `url`; make the destination visible and send only the bounded input needed for the narrow question—not full transcripts or repository contents by default.
 
 **First questions (all advisory):**
 
@@ -997,7 +1003,7 @@ Use elapsed-time boxes from the start/resumption of implementation; these are bu
 | T+04:20–05:00 | CLI end-to-end flow, persisted report and compact handoff. | Seeded demo works without MCP or LLM. |
 | T+05:00–06:00 | MCP tools backed by the same core; complete the one real host integration and verify response semantics. | Agent can retrieve status/request verification; actual enforcement is stated honestly. |
 | T+06:00–07:00 | Stabilize core integration; run clean-room demo twice, fix data/state bugs. | No manual DB edits or undocumented setup required. |
-| T+07:00–07:30 | **Optional single stretch:** one decision-advisor call (advisory only) OR one existing Playwright smoke test. | Drop immediately if it threatens core stability or needs significant setup. |
+| T+07:00–07:30 | **Optional single stretch:** one minimal local status panel OR one narrow SystemOne advisor call OR one existing Playwright smoke test. | Drop immediately if it threatens core stability or needs significant setup. |
 | T+07:30–08:00 | Improve the report and README demo flow. | A reviewer can understand task, blocker, evidence and verdict quickly. |
 | T+08:00–09:15 | Unit/integration tests, static checks, security/timeout review, restart/persistence test. | Core passes after a fresh restart. |
 | T+09:15–10:00 | Rehearse the primary demo, record a fallback, and validate claims against working code. | One repeatable story with no reliance on model misbehavior. |
@@ -1020,7 +1026,7 @@ The exact host is chosen by the first spike, not by assumptions in documentation
 
 ### Time-cut order
 
-Cut in this order: dashboard polish → optional advisor/browser check (whichever was not selected) → auto-init/architecture rules → extra profile polish. Do not cut: contract integrity, persisted state, evidence freshness, deterministic verdict, bounded retries, one real integration attempt, or the repeatable end-to-end test.
+Cut in this order: optional panel/advisor/browser stretch (choose at most one) → auto-init/architecture rules → extra profile polish. Keep plain CLI progress output and Markdown/JSON receipt; do not spend core time on dashboard polish. Do not cut: contract integrity, persisted state, evidence freshness, deterministic verdict, bounded retries, one real integration attempt, or the repeatable end-to-end test.
 
 ## 20. Definition of done for the hackathon MVP
 
@@ -1038,7 +1044,7 @@ The MVP is done only when the prepared demo demonstrates all of the following:
 - `proofmesh demo` produces Markdown + JSON output from a clean setup without requiring a model/API call or network for the core scenario.
 - The report labels seeded events and unknown/unverified behavior honestly.
 
-The advisor, Playwright smoke check, GitHub PR gate, broad host support, multi-agent attribution, universal installer and polished dashboard are not part of the definition of done.
+The optional panel, advisor, Playwright smoke check, GitHub PR gate, broad host support, multi-agent attribution, universal installer and polished dashboard are not part of the definition of done.
 
 ## 21. Official and adjacent references
 
@@ -1089,7 +1095,7 @@ Keep the project straightforward to inspect, regardless of the event's judging f
 
 - **D-30 — Demo and product vision are separate.** The PRD/TRD retain the long-term ecosystem; only the scope-lock section, current P0 table and definition of done determine what is built for the event.
 - **D-31 — One vertical slice beats broad support.** One approved TaskFile → detected change/scope issue → real check → code-bound evidence → blocker/loop intervention → fix → fresh evidence → accepted verdict. One real host integration only.
-- **D-32 — Decision model is a stretch, not core.** The optional advisor is tried only after the core has passed twice from a clean state; one typed question at most; advisory can warn/escalate but never accept. Select either advisor or browser smoke as the stretch, not both by default.
+- **D-32 — Presentation/model extras are stretches, not core.** Only after the core has passed twice from a clean state, choose at most one: a minimal local read-only panel, one existing Playwright smoke test, or one narrow SystemOne advisor call. The advisor can warn/escalate but never accept.
 - **D-33 — Browser automation reuses existing tooling.** No browser automation framework is built. An existing Playwright smoke test is optional after the core is reliable.
 - **D-34 — Storage safety remains mandatory; advanced storage features do not.** SQLite persists state outside the repository with transactions, IDs and parameterized SQL. Hash-chain audit, backup/restore UX and distributed storage are future hardening.
 - **D-35 — Real integrations are evidence-based.** The first 25–30 minutes validate an actual hook and MCP connection. Only verified adapters are described as working; all others are partial/unsupported.

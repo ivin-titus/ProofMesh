@@ -2,7 +2,7 @@
 
 **Status:** Active build checklist  
 **Working branch:** main  
-**Updated at:** 2026-10-25T00:03:00+05:30  
+**Updated at:** 2026-10-25T00:17:59+05:30  
 **Deadline noted for planning:** October 25, 2026, 11:00 IST; confirm against current organizer communications. A live remaining-time countdown is intentionally omitted because it quickly becomes stale.  
 **Authority:** [PRD](PRD.md) defines product behavior and priorities; [TRD](TRD.md) §0 and §20 define the technical MVP boundary; this plan defines implementation order and cut lines. Follow [AGENTS.md](../AGENTS.md) for workflow and safety practices. Roadmap and historical ideation notes must not expand the MVP beyond the explicit scope lock.
 
@@ -43,6 +43,18 @@ A judge should be able to see the approved contract, what changed, why the task 
 - [x] Default trusted policy TOML created and verified.
 
 **Exit condition:** One task/event/evidence round-trip works. Do not build hash-chain audit, a daemon, ORM, remote database, or backup UX tonight.
+
+### Pre-Checkpoint 2 gate — package policy and foundation regressions (pending)
+
+A source review of `d5778c5` identified a likely installed-wheel default-policy gap. Resolve and test these items before beginning Checkpoint 2; this is a review finding, not a claim that a runtime test has reproduced each problem.
+
+- [ ] Package the default trusted policy as a reliable package resource. `src/proofmesh/config.py` currently resolves `config/default-policy.toml` relative to the source checkout and falls back to an empty `TrustedPolicy()` if the file is missing. An installed wheel may therefore lose its mandatory test gate. Fail clearly if the policy resource is unavailable, and test the installed wheel.
+- [ ] Test recursive immutability of nested `EventRecord.payload` data; a top-level `MappingProxyType` alone does not freeze nested lists/dictionaries.
+- [ ] Review storage-path permission handling so unsupported-filesystem cases are distinguished from real permission/I/O failures.
+- [ ] Make packaging tests reproducible from a clean checkout without depending on a stale prebuilt `dist/` artifact.
+- [ ] Reconcile Python-version documentation with `requires-python = ">=3.14,<3.15"`; distinguish the supported package range from any source tests run under Python 3.12.
+
+**Go/no-go:** Do not begin Checkpoint 2 until these repairs are committed with focused tests and the full suite is green on the target Python runtime.
 
 ### Checkpoint 2 — Intent / TaskFile
 
@@ -104,14 +116,16 @@ A judge should be able to see the approved contract, what changed, why the task 
 
 ### Checkpoint 8 — Presentation and one optional stretch
 
-Only after checkpoints 0–7 work:
+Only after the core demo passes at least twice from a clean state:
 
-- [ ] Improve the report/readout so judges immediately see intent, blocker, evidence and verdict.
-- [ ] Record a fallback demo and preserve exported reports.
-- [ ] Choose at most one stretch: an existing Playwright smoke test OR one narrow decision-advisor call.
-- [ ] For the advisor, allow only warning/request-review outcomes; it must never accept work or override deterministic gates.
+- [ ] Improve the Markdown/JSON receipt and **plain CLI progress output** so the demo shows concise phase changes, gate results, blockers and final verdict. Do not add a heavy TUI framework; terminal visibility is part of the core demo, not a stretch.
+- [ ] Record a fallback run and preserve exported reports.
+- [ ] Choose **at most one** optional stretch: (a) a minimal local progress panel, (b) an existing Playwright smoke test, or (c) one narrow SystemOne decision-advisor call. Do not implement two options just because parallel agents are available.
+- [ ] If choosing the panel: use vanilla HTML/CSS/JS and Python's standard-library HTTP server; start it explicitly with `proofmesh ui`, keep it off by default, bind only to `127.0.0.1`, make it read-only, and render the same versioned status/report data as the CLI. No npm build, framework, CDN, or frontend dependency in the core runtime. Ctrl+C stops it; CLI/demo must work with the panel off.
+- [ ] If choosing the advisor: configure a SystemOne-compatible endpoint for hosted Jev or a local Laya service; keep it disabled by default and expose credentials only via a named environment variable such as `PROOFMESH_ADVISOR_KEY`. Never persist or display the key. Send only the narrow, bounded data needed for the question. The answer may warn or request review, never accept work or override deterministic gates.
+- [ ] If choosing Playwright: reuse an existing test; do not build a browser automation framework.
 - [ ] Drop the stretch immediately if setup, networking, credentials or debugging threaten core stability.
-- [ ] Run the core twice again after final changes.
+- [ ] Run the core twice again after final changes and check that the panel (if selected) shows the same verdict/evidence as the CLI and receipt.
 
 ## 3. Separation of concerns
 
@@ -137,6 +151,18 @@ Rules:
 - Reports render persisted events/evidence/verdicts rather than recomputing them.
 - Browser testing and a decision advisor are extensions, not independent control loops.
 - Do not scaffold empty future modules just to make the repository look larger.
+
+### Parallel implementation strategy (developer workflow, not product scope)
+
+Subagents are encouraged for isolated implementation and verification work, but ProofMesh itself must not become an agent orchestrator.
+
+- Keep one main integrator responsible for shared interfaces, merges, final validation, and scope decisions.
+- Parallelize only after module contracts and file ownership are written down. Good independent tasks include a read-only security/code audit, a pure TaskFile parser, or repository snapshot/scope reporting after their input/output contracts are agreed.
+- Prefer one read-only reviewer plus one implementer in an isolated branch/worktree. Cap normal concurrency at two or three agents; additional agents are worthwhile only when their work and review are genuinely independent.
+- Do not let parallel agents edit shared models, storage schema, or public interfaces simultaneously. The integrator resolves shared-interface changes before other work depends on them.
+- Each agent must return changed paths, assumptions, exact checks run, test output/result, known gaps, and a reviewable diff/commit. Do not accept “tests pass” without the commands/results.
+- Integrate deliberately and rerun the full suite on the merged tree. A subagent's isolated test result does not prove the merged system works.
+- Record material AI-tool contributions accurately in `AI_USAGE.md`. Do not store private reasoning or transcripts as project artifacts.
 
 ## 4. Data integrity that must not be cut
 

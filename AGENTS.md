@@ -36,6 +36,18 @@ Read the project documents before implementation changes:
 - MCP, CLI, and host hooks call the same core services. Reports render persisted facts and stored verdicts rather than inventing results.
 - Never claim an agent hook enforces a rule unless host behavior has actually been tested.
 
+## Subagents and parallel implementation
+
+Use isolated subagents when they increase verification or implementation quality, but do not turn ProofMesh itself into an agent orchestrator.
+
+- Keep one main agent responsible for architecture decisions, shared interfaces, integration, merge decisions and the final full-suite run.
+- Prefer one read-only reviewer plus one implementer in a separate branch/worktree. Normal concurrency should be capped at two or three agents because each extra agent adds context, tool calls and review/merge cost.
+- Parallelize only bounded, genuinely independent tasks with explicit file ownership and agreed input/output contracts. Good candidates include a read-only security review, the pure TaskFile parser after its model contract is fixed, and repository snapshot/scope logic after its data contract is agreed.
+- Do not run parallel edits to shared models, migrations, storage APIs or public interfaces. The main agent resolves those contracts first.
+- Require every subagent to report changed files, assumptions, exact commands/checks, actual test results, known limitations and a reviewable diff/commit. Never treat an isolated passing test as proof that the integrated tree passes.
+- Integrate deliberately in the parent worktree and rerun relevant tests after merge. Preserve user changes and never reset/clean a worktree to resolve conflicts.
+- Keep subagent usage as a developer workflow only; multi-agent orchestration, guaranteed attribution and worktree coordination are not MVP product features.
+
 ## Documentation and collaboration
 
 - Update CHANGELOG.md in the same commit as each meaningful milestone. Record the real timestamp/time zone, purpose, validation performed, and known limitations.
@@ -44,5 +56,5 @@ Read the project documents before implementation changes:
 - Inspect the current diff, finish coherent milestones, run appropriate checks, then commit. A roughly 30-minute checkpoint is a workflow target, not a reason to create empty commits.
 - Never backdate commits, force-push, or rewrite shared history.
 - Report tests and validation accurately; distinguish planned, simulated, and verified behavior.
-- Never commit credentials, API keys, private participant data, or personal tokens. Use environment variables and sanitized examples.
+- Never commit credentials, API keys, private participant data, or personal tokens. Use environment variables and sanitized examples. Optional advisor credentials must be read from a trusted environment-variable name and never persisted or exposed in logs, reports, or UI.
 - Keep ProofMesh's database and artifacts outside the target project's agent-writable directory. Do not store full chat transcripts or private reasoning by default.
