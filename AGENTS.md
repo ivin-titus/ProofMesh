@@ -3,8 +3,8 @@
 Read these files before making implementation changes:
 
 1. [RULES.md](RULES.md) — repository practices and event-template caveat.
-2. [ProofMesh_PRD.md](ProofMesh_PRD.md) — product boundaries and acceptance criteria.
-3. [ProofMesh_TRD.md](ProofMesh_TRD.md) — technical design and security boundaries.
+2. [docs/PRD.md](docs/PRD.md) — product boundaries and acceptance criteria.
+3. [docs/TRD.md](docs/TRD.md) — technical design and security boundaries.
 4. [docs/BUILD_PLAN.md](docs/BUILD_PLAN.md) — implementation order and stop/go checkpoints.
 5. [CHANGELOG.md](CHANGELOG.md) and [AI_USAGE.md](AI_USAGE.md) — required development records.
 

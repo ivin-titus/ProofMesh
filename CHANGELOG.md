@@ -1,5 +1,14 @@
 # Change log
 
+## 2026-10-24T22:26:23+05:30 — Organize specifications under docs/
+
+- **Changed:** Moved the PRD to `docs/PRD.md`, the TRD to `docs/TRD.md`, and the event-track PDF to `docs/BUILD_TRACKS.pdf`. Updated README/agent/build-plan links and added a direct link to the track reference. Expanded `AI_USAGE.md` to record the earlier Devin-assisted ideation/specification work, separately from Git commit authorship.
+- **Why:** Keep project specifications and supporting event material together under `docs/`, with clear navigation and an honest AI-contribution record.
+- **Validation:** Checked all current repository references to the prior filenames; verified the moved spec and PDF paths use the existing blobs so their contents are unchanged; reviewed the updated AI-usage and change records.
+- **Test result:** Documentation/file-organization change only; no runtime tests were run because the application implementation has not started.
+- **Limitations:** Devin's exact model/version was not recorded; its contribution is described at the project-document level rather than attributing individual lines or Git commits.
+
+
 ## 2026-10-24T22:15:13+05:30 — Correct event-template assumptions
 
 - **Changed:** Updated README.md, AGENTS.md, RULES.md, AI_USAGE.md, SUBMISSION.md, and docs/BUILD_PLAN.md to reflect the corrected Devin Hack Kochi guidance in the linked reference branch. Removed the inherited mandatory-Codex assumption and reframed the from-scratch implementation plan as a ProofMesh project commitment rather than an asserted event rule.

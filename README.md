@@ -20,8 +20,9 @@ The repository currently contains the product and technical specifications, the 
 
 ### Key documents
 
-- [Product Requirements Document](ProofMesh_PRD.md) — product goals, user needs, demo scope, non-goals, acceptance criteria, and roadmap.
-- [Technical Requirements Document](ProofMesh_TRD.md) — architecture, domain model, storage, adapters, security, and technical acceptance criteria.
+- [Product Requirements Document](docs/PRD.md) — product goals, user needs, demo scope, non-goals, acceptance criteria, and roadmap.
+- [Technical Requirements Document](docs/TRD.md) — architecture, domain model, storage, adapters, security, and technical acceptance criteria.
+- [Hackathon tracks reference](docs/BUILD_TRACKS.pdf) — the supplied event-track PDF.
 - [Overnight Build Plan](docs/BUILD_PLAN.md) — implementation checkpoints, scope cut lines, demo script, and end-of-night checklist.
 - [Repository working rules](RULES.md) and [AI-agent guidance](AGENTS.md).
 - [AI usage record](AI_USAGE.md), [change log](CHANGELOG.md), and [submission checklist](SUBMISSION.md).
