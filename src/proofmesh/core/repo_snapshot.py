@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import fnmatch
 from pathlib import Path, PurePosixPath
 import subprocess
-from typing import Sequence
+from typing import Callable, Sequence
 
 from proofmesh.models import FileFingerprint, RepoSnapshot
 
@@ -138,8 +138,18 @@ def capture_snapshot(
     git_commit, git_dirty, tracked_files = _get_git_state(repo_root_path)
 
     fingerprints: list[FileFingerprint] = []
+    observation_errors: list[str] = []
+    complete: bool = True
 
-    for root, dirs, files in os_walk_safe(repo_root_path, all_patterns):
+    def record_error(msg: str) -> None:
+        nonlocal complete
+        complete = False
+        if len(observation_errors) < 50:
+            observation_errors.append(msg)
+        elif len(observation_errors) == 50:
+            observation_errors.append("... additional observation errors truncated (limit 50 reached)")
+
+    for root, dirs, files in os_walk_safe(repo_root_path, all_patterns, on_error=record_error):
         rel_root = Path(root).relative_to(repo_root_path).as_posix()
         if rel_root == ".":
             rel_root = ""
@@ -154,15 +164,16 @@ def capture_snapshot(
             if file_path.is_symlink():
                 try:
                     target = file_path.resolve(strict=True)
-                except (OSError, ValueError, RuntimeError):
-                    # Broken symlink or loop: skip
+                except (OSError, ValueError, RuntimeError) as e:
+                    record_error(f"Broken symlink '{file_rel}': {e}")
                     continue
 
                 if not target.is_relative_to(repo_root_path):
-                    # Escaping symlink: skip
+                    record_error(f"Symlink '{file_rel}' resolves outside workspace root: '{target}'")
                     continue
 
                 if not target.is_file():
+                    record_error(f"Symlink '{file_rel}' does not resolve to a regular file")
                     continue
 
                 target_rel = target.relative_to(repo_root_path).as_posix()
@@ -170,6 +181,7 @@ def capture_snapshot(
                     continue
             else:
                 if not file_path.is_file():
+                    record_error(f"Path '{file_rel}' is not a regular file or readable object")
                     continue
 
             try:
@@ -179,7 +191,8 @@ def capture_snapshot(
                     while chunk := fp.read(65536):
                         hasher.update(chunk)
                         size_bytes += len(chunk)
-            except OSError:
+            except OSError as e:
+                record_error(f"Unreadable file '{file_rel}': {e}")
                 continue
 
             sha256_hex = hasher.hexdigest()
@@ -210,13 +223,24 @@ def capture_snapshot(
         git_dirty=git_dirty,
         files=sorted_files,
         captured_at=datetime.now(timezone.utc),
+        complete=complete,
+        observation_errors=tuple(observation_errors),
     )
 
 
-def os_walk_safe(repo_root: Path, patterns: Sequence[str]):
-    """Walk repo_root pruning excluded directories and protecting against symlink escapes."""
+def os_walk_safe(
+    repo_root: Path,
+    patterns: Sequence[str],
+    on_error: Callable[[str], None] | None = None,
+):
+    """Walk repo_root pruning excluded directories, protecting against symlink escapes, and capturing errors."""
     import os
-    for root, dirs, files in os.walk(str(repo_root), followlinks=False):
+
+    def _walk_error(err: OSError) -> None:
+        if on_error is not None:
+            on_error(f"Directory traversal error: {err}")
+
+    for root, dirs, files in os.walk(str(repo_root), followlinks=False, onerror=_walk_error):
         rel_root = Path(root).relative_to(repo_root).as_posix()
         if rel_root == ".":
             rel_root = ""
@@ -232,8 +256,12 @@ def os_walk_safe(repo_root: Path, patterns: Sequence[str]):
                 try:
                     target = d_path.resolve(strict=True)
                     if not target.is_relative_to(repo_root):
+                        if on_error is not None:
+                            on_error(f"Symlink directory '{dir_rel}' resolves outside workspace root: '{target}'")
                         continue
-                except (OSError, ValueError, RuntimeError):
+                except (OSError, ValueError, RuntimeError) as e:
+                    if on_error is not None:
+                        on_error(f"Broken symlink directory '{dir_rel}': {e}")
                     continue
 
             pruned_dirs.append(d)
