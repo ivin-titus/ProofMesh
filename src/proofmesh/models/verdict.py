@@ -4,6 +4,7 @@ from pydantic import Field, field_validator
 from proofmesh.models.base import (
     FrozenModel,
     Identifier,
+    Sha256Digest,
     to_immutable_tuple,
     validate_utc_datetime,
 )
@@ -27,7 +28,7 @@ class VerdictRecord(FrozenModel):
     verdict_id: Identifier
     session_id: Identifier
     contract_revision: int = Field(ge=1)
-    snapshot_id: Identifier
+    snapshot_id: Sha256Digest | Identifier
     verdict: VerdictOutcome
     enforcement_level: EnforcementLevel
     reasons: tuple[str, ...] = Field(default_factory=tuple)

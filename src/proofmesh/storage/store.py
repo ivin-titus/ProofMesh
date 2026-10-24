@@ -128,6 +128,13 @@ class ProofMeshStore:
     def save_task_revision(self, revision: TaskRevision, project_id: str) -> None:
         """Persist a task revision within an explicit transaction."""
         validate_project_id(project_id)
+
+        existing = self.get_task_revision(revision.task_id, revision.revision)
+        if existing is not None and existing.approval_status == ApprovalStatus.APPROVED:
+            if revision.approval_status not in (ApprovalStatus.APPROVED, ApprovalStatus.SUPERSEDED):
+                raise ValueError(
+                    f"Task revision '{revision.task_id}' rev {revision.revision} is approved and immutable"
+                )
         ac_json = json.dumps([ac.model_dump(mode="json") for ac in revision.acceptance_criteria])
         scope_json = json.dumps(revision.scope.model_dump(mode="json"))
         gates_json = json.dumps(revision.required_gates)

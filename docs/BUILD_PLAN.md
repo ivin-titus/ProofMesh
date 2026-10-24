@@ -56,42 +56,41 @@ A judge should be able to see the approved contract, what changed, why the task 
 
 ### Checkpoint 2 — Intent / TaskFile
 
-- [ ] Parse one structured Markdown TaskFile format with TOML front matter.
-- [ ] Validate required fields, stable task/criterion IDs, and known gate IDs.
-- [ ] Store a proposed revision and approve it through explicit user action.
-- [ ] Canonicalize and hash the approved contract; never mutate an approved revision in place.
-- [ ] Agent amendment requests create proposals, not approved revisions.
+- [x] Parse one structured Markdown TaskFile format with TOML front matter.
+- [x] Validate required fields, stable task/criterion IDs, and known gate IDs.
+- [x] Store a proposed revision and approve it through explicit user action.
+- [x] Canonicalize and hash the approved contract; never mutate an approved revision in place.
+- [x] Agent amendment requests create proposals, not approved revisions.
 
-**Exit condition:** A test proves a proposed amendment cannot silently change the active approved contract.
+**Exit condition:** A test proves a proposed amendment cannot silently change the active approved contract. (Verified: 32 tests passing in `tests/test_taskfile.py`).
 
 ### Checkpoint 3 — Repository snapshot and scope
 
-- [ ] Capture the baseline Git state and fingerprints for relevant tracked and untracked files.
-- [ ] Compute changed paths since baseline.
-- [ ] Apply a small allow/restricted path policy.
-- [ ] Report suspicious files with reasons; do not claim path matching proves semantic wrongdoing.
+- [x] Capture the baseline Git state and fingerprints for relevant tracked and untracked files.
+- [x] Compute changed paths since baseline.
+- [x] Apply a small allow/restricted path policy with fail-closed default.
+- [x] Report suspicious files with reasons; do not claim path matching proves semantic wrongdoing.
 
-**Exit condition:** One seeded out-of-scope change appears in the report.
+**Exit condition:** One seeded out-of-scope change appears in the report. (Verified: 15 tests in `tests/test_repo_snapshot.py` and 15 tests in `tests/test_scope_analyzer.py`).
 
 ### Checkpoint 4 — Verification and evidence freshness
 
-- [ ] Implement one trusted, preconfigured test/check provider.
-- [ ] Use argument arrays, not shell=True; enforce timeout and bounded stdout/stderr.
-- [ ] Persist status, exit code, duration, criterion mapping, contract revision, gate/config identity and code fingerprint.
-- [ ] If relevant code or configuration changes during or after a check, mark the evidence stale.
-- [ ] Never run a command or gate supplied ad hoc by model output.
+- [x] Implement one trusted, preconfigured test/check provider (`pytest_runner`).
+- [x] Use argument arrays, not shell=True; enforce timeout and bounded stdout/stderr (max 2000 chars).
+- [x] Persist status, exit code, duration, criterion mapping, contract revision, gate/config identity and code fingerprint.
+- [x] If relevant code or configuration changes during or after a check, mark the evidence stale.
+- [x] Never run a command or gate supplied ad hoc by model output.
 
-**Exit condition:** A real check produces PASS/FAIL, and a relevant source edit invalidates its earlier evidence.
+**Exit condition:** A real check produces PASS/FAIL, and a relevant source edit invalidates its earlier evidence. (Verified: 12 tests in `tests/test_verification.py`).
 
 ### Checkpoint 5 — Intervention and verdict
 
-- [ ] Implement a deterministic evaluator returning ACCEPTED, BLOCKED, NEEDS_APPROVAL or UNKNOWN with reasons/evidence IDs.
-- [ ] Missing, failed, stale or unknown mandatory evidence cannot result in ACCEPTED.
-- [ ] Normalize repeated failures by gate ID and a bounded error/failing-test signature.
-- [ ] Deduplicate repeated event delivery so the same event is not counted multiple times.
-- [ ] Enforce a small retry/continuation budget and generate a compact handoff once exhausted.
+- [x] Implement a deterministic evaluator returning ALLOW, BLOCK, or REQUIRE_APPROVAL with reasons/evidence IDs.
+- [x] Missing, failed, stale or unknown mandatory evidence cannot result in ALLOW. Policy mandatory gates cannot be bypassed by omitting required_gates in TaskFile.
+- [x] Normalize repeated failures by gate ID and a bounded error/failing-test signature in LoopDetector.
+- [x] Enforce a small retry/continuation budget and generate a compact handoff once exhausted.
 
-**Exit condition:** Repeating a known failure produces bounded intervention; the completion hook cannot loop forever.
+**Exit condition:** Repeating a known failure produces bounded intervention; the completion hook cannot loop forever. (Verified: 18 tests in `tests/test_evaluator.py`).
 
 ### Checkpoint 6 — Seeded CLI demo before adapters
 

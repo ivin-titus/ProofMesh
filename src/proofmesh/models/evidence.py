@@ -31,8 +31,8 @@ class EvidenceRecord(FrozenModel):
     started_at: datetime
     ended_at: datetime
     duration_ms: int = Field(ge=0)
-    snapshot_before: Identifier
-    snapshot_after: Identifier
+    snapshot_before: Sha256Digest | Identifier
+    snapshot_after: Sha256Digest | Identifier
     status: EvidenceStatus
     exit_code: int | None = None
     summary: str = Field(min_length=1, max_length=5000)

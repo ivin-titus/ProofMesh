@@ -37,8 +37,8 @@ class Session(StrictModel):
     task_id: Identifier
     contract_revision: int = Field(ge=1)
     repo_root: str = Field(min_length=1, max_length=1000)
-    baseline_snapshot_id: Identifier
-    current_snapshot_id: Identifier | None = None
+    baseline_snapshot_id: Sha256Digest | Identifier
+    current_snapshot_id: Sha256Digest | Identifier | None = None
     profile: OperatingProfile = OperatingProfile.FLOW
     policy_digest: Sha256Digest
     integration_status: IntegrationStatus = IntegrationStatus.PARTIAL

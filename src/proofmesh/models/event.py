@@ -5,6 +5,7 @@ from proofmesh.models.base import (
     FrozenModel,
     Identifier,
     ImmutableDict,
+    Sha256Digest,
     to_immutable_dict,
     validate_utc_datetime,
 )
@@ -21,8 +22,8 @@ class EventRecord(FrozenModel):
     host_turn_id: str | None = Field(default=None, max_length=128)
     command_signature: str | None = Field(default=None, max_length=512)
     exit_status: int | None = None
-    snapshot_before: Identifier | None = None
-    snapshot_after: Identifier | None = None
+    snapshot_before: Sha256Digest | Identifier | None = None
+    snapshot_after: Sha256Digest | Identifier | None = None
     summary: str = Field(min_length=1, max_length=2000)
     payload_schema_version: int = Field(default=1, ge=1)
     payload: ImmutableDict = Field(default_factory=lambda: MappingProxyType({}))
