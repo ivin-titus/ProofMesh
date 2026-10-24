@@ -38,18 +38,27 @@ def get_receipt_for_session(
     Never calculates or persists new verdicts, never executes live verification checks,
     and never modifies database tables.
     """
-    effective_repo_root = repo_root or Path.cwd()
-
     # Resolve session
     if session_id:
-        session = store.get_session(session_id)
+        if repo_root is not None:
+            session = store.get_session(session_id, repo_root=repo_root)
+        else:
+            session = store.get_session(session_id)
     else:
         conn = store.get_connection()
         try:
-            row = conn.execute(
-                "SELECT session_id FROM sessions ORDER BY started_at DESC LIMIT 1;"
-            ).fetchone()
-            session = store.get_session(row["session_id"]) if row else None
+            if repo_root is not None:
+                canonical_root = str(Path(repo_root).resolve())
+                row = conn.execute(
+                    "SELECT session_id FROM sessions WHERE repo_root = ? ORDER BY started_at DESC LIMIT 1;",
+                    (canonical_root,),
+                ).fetchone()
+                session = store.get_session(row["session_id"], repo_root=repo_root) if row else None
+            else:
+                row = conn.execute(
+                    "SELECT session_id FROM sessions ORDER BY started_at DESC LIMIT 1;"
+                ).fetchone()
+                session = store.get_session(row["session_id"]) if row else None
         finally:
             conn.close()
 
@@ -102,9 +111,21 @@ def get_receipt_for_session(
         "evidence": [e.model_dump(mode="json") for e in evidence_records],
         "verdict": None,
     }
-    canonical_repr = json.dumps(receipt, sort_keys=True, separators=(",", ":"))
+    deterministic_state = {
+        "session": session.model_dump(mode="json"),
+        "task": task_revision.model_dump(mode="json"),
+        "snapshot_id": current_snapshot.snapshot_id,
+        "scope": scope_result.model_dump(mode="json"),
+        "evidence": [e.model_dump(mode="json") for e in evidence_records],
+        "verdict": None,
+    }
+    canonical_repr = json.dumps(deterministic_state, sort_keys=True, separators=(",", ":"))
     receipt["receipt_digest"] = f"sha256:{hashlib.sha256(canonical_repr.encode('utf-8')).hexdigest()}"
     return receipt
+
+
+# Alias for backward and forward API compatibility
+get_dashboard_data = get_receipt_for_session
 
 
 def render_dashboard_html(receipt: dict[str, Any] | None) -> str:
