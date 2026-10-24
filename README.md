@@ -65,6 +65,9 @@ proofmesh evaluate
 # Render Markdown report or export canonical JSON receipt
 proofmesh report
 proofmesh report --json
+
+# Launch local read-only web status dashboard
+proofmesh ui --port 8765
 ```
 
 ### 3. Connect Model Context Protocol (MCP) Server
@@ -97,6 +100,7 @@ Or connect it programmatically in your agent config (e.g., in `.agents/mcp.json`
 - [Agent instructions](AGENTS.md) — development practices, security boundaries, and document ownership.
 - [AI assistance record](AI_USAGE.md) — documented AI contributions, separate from Git authorship.
 - [Change log](CHANGELOG.md) — significant project changes and validation.
+- [Dogfooding Guide](docs/DOGFOODING.md) — step-by-step instructions for testing ProofMesh in isolated worktrees.
 - [Submission status](SUBMISSION.md) — project details and outstanding demo/submission checklist.
 
 ## Implementation and runtime
