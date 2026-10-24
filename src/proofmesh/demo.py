@@ -111,12 +111,15 @@ bypass_all_auth = true
 allow_arbitrary_eval = true
 """
 
+PYTEST_INI_CONTENT = "[pytest]\npythonpath = .\n"
+
 
 def _validate_and_prepare_target(target_path: Path) -> None:
     """Validate target directory safety and ensure fixture marker is present.
 
     Refuses to modify non-empty directories that do not contain the dedicated
-    ProofMesh fixture marker file (.proofmesh-fixture).
+    ProofMesh fixture marker file (.proofmesh-fixture), or directories that contain
+    colliding files that cannot be proven to be prior demo-owned artifacts.
     """
     if target_path.exists():
         if not target_path.is_dir():
@@ -131,6 +134,43 @@ def _validate_and_prepare_target(target_path: Path) -> None:
                     f"the ProofMesh fixture marker ('{FIXTURE_MARKER}'). "
                     f"Refusing to modify or delete files in caller directory."
                 )
+
+            # Check colliding files to ensure foreign pre-existing files are not overwritten
+            math_svc = target_path / "src" / "math_service.py"
+            if math_svc.is_file():
+                content = math_svc.read_text(encoding="utf-8")
+                if content not in (INITIAL_MATH_SERVICE, EXTENDED_MATH_SERVICE):
+                    raise ValueError(
+                        f"Target directory '{target_path}' contains pre-existing 'src/math_service.py' "
+                        f"with foreign content. Refusing to overwrite user file."
+                    )
+
+            math_test = target_path / "tests" / "test_math.py"
+            if math_test.is_file():
+                content = math_test.read_text(encoding="utf-8")
+                if content not in (INITIAL_TEST_MATH, EXTENDED_TEST_MATH):
+                    raise ValueError(
+                        f"Target directory '{target_path}' contains pre-existing 'tests/test_math.py' "
+                        f"with foreign content. Refusing to overwrite user file."
+                    )
+
+            pytest_ini = target_path / "pytest.ini"
+            if pytest_ini.is_file():
+                content = pytest_ini.read_text(encoding="utf-8")
+                if content != PYTEST_INI_CONTENT:
+                    raise ValueError(
+                        f"Target directory '{target_path}' contains pre-existing 'pytest.ini' "
+                        f"with foreign content. Refusing to overwrite user file."
+                    )
+
+            sec_cfg = target_path / "config" / "security.toml"
+            if sec_cfg.is_file():
+                content = sec_cfg.read_text(encoding="utf-8")
+                if content != VIOLATION_SECURITY_CONFIG:
+                    raise ValueError(
+                        f"Target directory '{target_path}' contains pre-existing 'config/security.toml' "
+                        f"with foreign content. Refusing to overwrite user file."
+                    )
     else:
         target_path.mkdir(parents=True, exist_ok=True)
 
@@ -159,13 +199,22 @@ def _validate_and_prepare_database(db_file: Path, project_id: str) -> None:
                 )
             if "projects" in tables:
                 cursor.execute("SELECT project_id FROM projects;")
-                existing_projects = {row[0] for row in cursor.fetchall()}
-                foreign_projects = existing_projects - {project_id}
+                existing_project_ids = {row[0] for row in cursor.fetchall()}
+                foreign_projects = existing_project_ids - {project_id}
                 if foreign_projects:
                     raise ValueError(
                         f"Database path '{db_file}' contains non-demo projects ({foreign_projects}). "
                         f"Refusing to overwrite or delete caller-supplied database."
                     )
+                if project_id in existing_project_ids and "tasks" in tables:
+                    cursor.execute("SELECT task_id FROM tasks WHERE project_id = ?;", (project_id,))
+                    task_ids = {row[0] for row in cursor.fetchall()}
+                    foreign_tasks = task_ids - {"task-calc-extension"}
+                    if foreign_tasks:
+                        raise ValueError(
+                            f"Database path '{db_file}' contains project '{project_id}' with non-demo tasks ({foreign_tasks}). "
+                            f"Refusing to overwrite or reset caller-supplied database."
+                        )
         finally:
             conn.close()
     except sqlite3.DatabaseError as e:
@@ -243,6 +292,12 @@ def _clean_demo_artifacts(target_path: Path) -> None:
 
     violation_file = target_path / "config" / "security.toml"
     if violation_file.exists():
+        content = violation_file.read_text(encoding="utf-8")
+        if content != VIOLATION_SECURITY_CONFIG:
+            raise ValueError(
+                f"Temporary file '{violation_file}' has been altered by an external process. "
+                "Refusing to delete altered file."
+            )
         violation_file.unlink(missing_ok=True)
     config_dir = target_path / "config"
     if config_dir.is_dir() and not any(config_dir.iterdir()):
@@ -353,7 +408,7 @@ def run_seeded_demo(
         current_snapshot_id=baseline_snapshot.snapshot_id,
         profile=OperatingProfile.FLOW,
         policy_digest=policy_digest,
-        integration_status=IntegrationStatus.ENFORCED,
+        integration_status=IntegrationStatus.UNGUARDED,
         state=SessionState.ACTIVE,
         started_at=datetime.now(timezone.utc),
     )

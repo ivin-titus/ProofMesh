@@ -135,3 +135,101 @@ def test_refuse_invalid_sqlite_file_as_db_path(tmp_path: Path):
     assert "not a valid SQLite database" in str(excinfo.value)
     assert db_file.is_file()
     assert db_file.read_text(encoding="utf-8") == "THIS IS NOT SQLITE\n"
+
+
+def test_refuse_marked_target_with_foreign_math_service(tmp_path: Path):
+    """Demo must refuse if marked target contains foreign src/math_service.py."""
+    target_dir = tmp_path / "fixture_project"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / FIXTURE_MARKER).write_text("proofmesh-fixture\n", encoding="utf-8")
+
+    src_dir = target_dir / "src"
+    src_dir.mkdir(parents=True, exist_ok=True)
+    foreign_math = src_dir / "math_service.py"
+    foreign_math.write_text("# Foreign user math code\ndef add(a, b): return a * b\n", encoding="utf-8")
+
+    db_file = tmp_path / "storage" / "test.db"
+
+    with pytest.raises(ValueError) as excinfo:
+        run_seeded_demo(target_dir=target_dir, db_path=db_file)
+
+    assert "foreign content" in str(excinfo.value)
+    assert "src/math_service.py" in str(excinfo.value)
+    # File must be preserved byte-for-byte
+    assert foreign_math.read_text(encoding="utf-8") == "# Foreign user math code\ndef add(a, b): return a * b\n"
+
+
+def test_refuse_marked_target_with_foreign_test_math_or_pytest_ini(tmp_path: Path):
+    """Demo must refuse if marked target contains foreign tests/test_math.py or pytest.ini."""
+    target_dir = tmp_path / "fixture_project"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / FIXTURE_MARKER).write_text("proofmesh-fixture\n", encoding="utf-8")
+
+    pytest_ini = target_dir / "pytest.ini"
+    pytest_ini.write_text("[pytest]\naddopts = --custom-flag\n", encoding="utf-8")
+
+    db_file = tmp_path / "storage" / "test.db"
+
+    with pytest.raises(ValueError) as excinfo:
+        run_seeded_demo(target_dir=target_dir, db_path=db_file)
+
+    assert "foreign content" in str(excinfo.value)
+    assert "pytest.ini" in str(excinfo.value)
+    assert pytest_ini.read_text(encoding="utf-8") == "[pytest]\naddopts = --custom-flag\n"
+
+
+def test_refuse_marked_target_with_foreign_security_toml(tmp_path: Path):
+    """Demo must refuse if marked target contains foreign config/security.toml before execution."""
+    target_dir = tmp_path / "fixture_project"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / FIXTURE_MARKER).write_text("proofmesh-fixture\n", encoding="utf-8")
+
+    config_dir = target_dir / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    sec_file = config_dir / "security.toml"
+    sec_file.write_text("user_auth = 'real_secret'\n", encoding="utf-8")
+
+    db_file = tmp_path / "storage" / "test.db"
+
+    with pytest.raises(ValueError) as excinfo:
+        run_seeded_demo(target_dir=target_dir, db_path=db_file)
+
+    assert "foreign content" in str(excinfo.value)
+    assert "config/security.toml" in str(excinfo.value)
+    assert sec_file.read_text(encoding="utf-8") == "user_auth = 'real_secret'\n"
+
+
+def test_refuse_caller_database_with_same_project_id_but_foreign_task(tmp_path: Path):
+    """Demo must refuse if database has project ID seeded-demo-project with foreign tasks."""
+    target_dir = tmp_path / "demo_target"
+    db_file = tmp_path / "storage" / "colliding_pm.db"
+    db_file.parent.mkdir(parents=True, exist_ok=True)
+
+    from proofmesh.storage.store import ProofMeshStore
+    store = ProofMeshStore(db_file)
+    store.create_project("seeded-demo-project", root_path=str(tmp_path / "user_repo"))
+    conn = store.get_connection()
+    conn.execute("INSERT INTO tasks (task_id, project_id, created_at) VALUES ('task-user-foreign', 'seeded-demo-project', '2026-01-01');")
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(ValueError) as excinfo:
+        run_seeded_demo(target_dir=target_dir, db_path=db_file)
+
+    assert "non-demo tasks" in str(excinfo.value)
+
+
+def test_repeatable_demo_run_preserves_valid_fixture(tmp_path: Path):
+    """Demo must be repeatable in the same fixture workspace without crashing."""
+    target_dir = tmp_path / "repeat_fixture"
+    db_file = tmp_path / "storage" / "repeat.db"
+
+    res1 = run_seeded_demo(target_dir=target_dir, db_path=db_file)
+    assert res1["status"] == "success"
+    assert res1["session"].integration_status.value == "unguarded"
+
+    # Second run against the same fixture directory and DB
+    res2 = run_seeded_demo(target_dir=target_dir, db_path=db_file)
+    assert res2["status"] == "success"
+    assert res2["session"].integration_status.value == "unguarded"
+
