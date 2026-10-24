@@ -704,37 +704,35 @@ Each adapter declares capabilities such as:
 
 Capabilities are reported as facts, not inferred from MCP availability.
 
-### 13.2 Host adapters (agent-neutral)
+### 13.2 Host adapters (agent-neutral) — architecture reference; not an MVP support promise
 
-ProofMesh must work with any tool that supports MCP and/or lifecycle hooks. Integration has two layers:
+ProofMesh's core supports an agent-neutral adapter contract. The hackathon build validates **one actual host only**, selected during the first 25–30 minute integration spike. MCP access is portable but advisory by itself. A native hook's enforcement capabilities must be verified against the installed host version and documented payload/response semantics.
 
-1. **MCP (all hosts):** the same stdio server everywhere. Gives read/propose/verify/status/handoff tools. Advisory on its own → enforcement level `PARTIAL` at best.
-2. **Hooks (per host):** every host calls one entry point, `proofmesh hook <event> --host <name>`, with the host's JSON on stdin. A thin host module maps that JSON to ProofMesh's host-neutral `HookEvent` model and maps the `HookDecision` back to the host's output format. No policy logic lives in host modules.
+Adapter responsibilities:
 
-Initial targets (from current official docs; validate exact schemas against the installed version before implementing). Claude Code, Codex and Devin CLI share one Claude-style schema (`decision`/`reason`, `hookSpecificOutput`, exit code 2 = block), so they share one adapter; Antigravity and OpenCode get their own:
+1. Parse the host-native event and validate it.
+2. Map it to a host-neutral HookEvent.
+3. Call the shared ProofMesh core.
+4. Translate the typed HookDecision back to a supported host response.
+5. Report actual enforcement health/capability. Never claim a block or continuation where the host does not support it.
 
-| Host | MCP | Hook events relevant to ProofMesh | Can block a tool call | Can continue a finished turn | Adapter form |
-|---|---|---|---|---|---|
-| Codex | yes | `SessionStart`, `PreToolUse`, `PostToolUse`, `Stop`, `SubagentStop`, `UserPromptSubmit` | yes (`permissionDecision: deny`) | yes (`Stop` → `{"decision":"block","reason":…}`; `stop_hook_active` flag) | command hook |
-| Claude Code | yes | `SessionStart`, `PreToolUse`, `PostToolUse`, `Stop`, `SubagentStop`, `TaskCompleted`, … | yes | yes (`Stop` decision control) | command hook |
-| Devin (CLI / Desktop) | yes | `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PermissionRequest`, `Stop`, `PostCompaction` (`.devin/hooks.v1.json`, Claude Code compatible; also imports `.claude/` hooks) | yes (`decision: block` or exit 2) | yes (`Stop` → `{"decision":"block","reason":…}`; `stop_hook_active`) | command hook (Claude-style) |
-| Devin (cloud sessions) | yes (plugin / Customize → MCPs) | hooks via Customize → Hooks; docs say hooks are best effort, and plugin-bundled hooks run only in CLI/Desktop | best effort | best effort | MCP + skill + **CI gate** (§13.7) |
-| Google Antigravity (App / CLI / IDE / VS Code) | yes | `SessionStart`, `PreToolUse`, `PostToolUse`, `PreInvocation`, `PostInvocation`, `Stop` | yes (`deny`; also `ask`/`force_ask` for human approval) | yes (`Stop` → `{"decision":"continue","reason":…}`) | command hook (§13.3) |
-| OpenCode | yes | plugin events: `tool.execute.before`, `tool.execute.after`, `session.idle`, `session.diff`, … | yes (from `tool.execute.before`) | to verify (`session.idle` looks notification-only) | tiny TS plugin that shells out to `proofmesh hook` |
-| Any other MCP-capable tool | yes | none | no | no | MCP only → `PARTIAL`/`UNGUARDED` |
+No task policy, loop logic, or acceptance logic may live only in an adapter.
 
-What each adapter does on the key events:
+The following matrix is future integration research, not a requirement to build or certify these hosts in the hackathon. Do not use this table as evidence that the current code supports them.
 
-- **Session start:** register session, capture baseline snapshot, run baseline gates (§6.2).
-- **Before tool use:** for file-writing tools, check the target path against scope; restricted path → `deny` or host-native `ask` per profile (§6.1). Never rewrite tool arguments.
-- **After tool use:** record the event and changed paths; mark evidence stale if relevant files changed.
-- **Stop / end of turn:** evaluate completion. If mandatory evidence is missing/failed and retry budget remains, return the host's continuation response with a short, focused reason; otherwise let the turn end and keep the task non-accepted.
+| Host target | Intended future integration | MVP status |
+|---|---|---|
+| Antigravity | MCP + native lifecycle hook | Preferred first spike; supported only after payload and response are verified |
+| Codex | MCP + command hooks | Future adapter |
+| Claude Code | MCP + command hooks | Future adapter |
+| Devin CLI/Desktop | MCP + supported hooks/plugin | Future adapter |
+| Devin cloud | MCP/plugin + CI verdict | Future; CI is outside MVP |
+| OpenCode | MCP + plugin adapter where needed | Future adapter |
+| Other MCP-capable tools | MCP advisory access | Works only if configured; does not imply enforcement |
 
-Loop safety for every host: honour host loop flags (e.g. Codex `stop_hook_active`), apply ProofMesh's own continuation budget, and make evaluation idempotent per (event, snapshot).
+Event mappings and hook behavior documented elsewhere in this TRD are reference designs for future adapters. For the demo, implement only the chosen host's event(s) that are verified in the installed version. If the initial host cannot be verified quickly, choose another locally available host rather than writing several speculative adapters.
 
-`proofmesh install <host>` writes that host's config (MCP server + hooks, as a plugin where supported) after showing what it will write; `proofmesh uninstall <host>` removes exactly what was written (§13.5). The enforcement report shows, per host, which capabilities are active.
-
-**Agent-neutral by design.** The product targets every MCP/hook-capable agent. The demo uses two: **Google Antigravity (VS Code extension)**, the developer's daily tool with smaller models, and **Devin**, whose PR is gated by the same contract through the CI verdict (§13.7). Other hosts are covered by golden-file tests of the shared adapters.
+A session may be reported as ENFORCED only for specific controls confirmed active. MCP-only or incomplete integration must be PARTIAL or UNGUARDED according to actual capabilities.
 
 ### 13.3 Antigravity adapter
 
@@ -766,43 +764,21 @@ Notes:
 - Test suites never run inside `PreToolUse`. Checks run through the MCP tool `run_verification` (or the CLI); the `Stop` hook evaluates the evidence that exists and, if it is missing or stale, answers `continue: run run_verification for gates X, Y`. The `Stop` handler gets a longer `timeout` only for baseline runs at session start, if needed.
 - **If ProofMesh itself fails** (crash, invalid payload, timeout): writes to protected paths fail closed (`deny`); other tool calls fail open (`allow`) so a ProofMesh bug cannot freeze the developer's agent; the `Stop` hook never reports acceptance; the failure is recorded and enforcement health drops to `PARTIAL`.
 
-### 13.5 Distribution: one portable package, installed from a repo link
+### 13.5 Distribution: portable plugin package — future packaging design
 
-Agents now install tooling by reading a repository's config files: Antigravity installs Claude Code–style tools from a pasted repo link (the developer's graphify setup works this way), Devin loads Claude-format plugins (`.claude-plugin/plugin.json`, root `.mcp.json`, `${CLAUDE_PLUGIN_ROOT}`) and Agent Plugins 1.0.0 packages, and accepts a repo plus subdirectory as a plugin source. So ProofMesh ships **one package in a subfolder of this repo**, using the most widely read layout, instead of per-agent installers:
+The long-term distribution goal is to keep the core package agent-neutral and ship host manifests, MCP configuration, an Agent Skill and hook mappings from a versioned plugin folder where hosts permit this.
 
-```text
-plugin/                                  # repo subfolder; install source = ivin-titus/ProofMesh + "plugin"
-  .claude-plugin/plugin.json             # name, version, description (read by Claude Code, Devin)
-  plugin.json                            # Antigravity / Agent Plugins manifest (same fields)
-  .mcp.json                              # stdio server: `uvx proofmesh==<pinned> mcp`
-  hooks/hooks.json                       # Claude-style events -> `uvx proofmesh==<pinned> hook <event> --host claude-style`
-  hooks.json                             # Antigravity events -> `... hook <event> --host antigravity`
-  skills/proofmesh/SKILL.md              # Agent Skills format, portable
-  rules/proofmesh.md                     # short always-on rule: "ProofMesh owns task acceptance"
-```
+**Not in the hackathon critical path:** universal repo-link installation, a cross-host installer, complete uninstall/doctor behavior, multiple co-located hook layouts, version signing, or support claims for every host. The MVP can use a documented manual MCP/hook configuration for the one selected host. Prefer a pinned package command and exact setup notes over building an installer.
 
-Ways in, all from the same folder:
+Future plugin packaging can include:
+- Host-specific manifest and hook configuration.
+- A portable SKILL.md for guidance-only integrations.
+- Version-pinned commands and an explicit uninstall procedure.
+- A doctor/report command that verifies what the host actually loaded.
+- Golden-file adapter tests for real captured event payloads.
+- A clear distinction between Skill guidance, MCP access, native hook steering, and independent CI gating.
 
-- **Paste the repo link** into the agent (Antigravity, Devin Customize → Plugins "From repository" with subdirectory `plugin`, `devin plugins install`, Claude Code plugin install).
-- **Skill only:** `npx skills add ivin-titus/ProofMesh` for agents without plugin support (guidance only).
-- **Fallback writer:** `uvx proofmesh install <host>` writes the same files into a host's global config for hosts that can't read the package; shows what it writes; exact `uninstall`.
-- **Project setup:** `uvx proofmesh init` (§6.4) proposes the policy; `proofmesh doctor` reports which hooks, MCP server and skill each detected host actually loaded.
-- **CI gate:** a small GitHub Action / `proofmesh verify --ci` (§13.7).
-
-Comparable tools researched (2026-10): graphify (`graphify <host> install` writes skill + always-on rule per host; no Antigravity hooks), Neon (`npx neon@latest init` writes MCP + skills per agent), Supabase (hosted MCP with `read_only`/`project_ref` scoping, plugin, skills), vercel-labs `skills` CLI (skills only; supports Antigravity paths). None of them enforce acceptance; they add capabilities. ProofMesh's package is small on purpose: the value is in the core (§6.6), not in the installer.
-
-Validate before relying on it: whether one folder can carry both hook layouts without a host loading the wrong one (each host has its own manifest precedence); fall back to per-host subfolders if not.
-
-**The skill** follows the open Agent Skills format (`SKILL.md` with `name` + `description` front matter), so the same file works in Antigravity, Devin, Claude Code and Codex. Best practices applied:
-
-- Third-person description with trigger keywords ("Works with ProofMesh task contracts, verification and acceptance. Use when starting, changing or finishing a coding task in a repository governed by ProofMesh.").
-- Short body with a decision tree: start task → `get_task_contract`; unsure about a file → `inspect_changes`; done → `run_verification` then `get_completion_status`; blocked → read the reason, fix, re-verify; need scope change → `propose_contract_amendment`, never edit policy.
-- Treat ProofMesh as a black box: call tools / `proofmesh --help`, don't read its source.
-- No secrets, no network, no instructions that claim enforcement the host doesn't provide.
-
-The skill is guidance; hooks are enforcement. The report never counts the skill as enforcement.
-
-Other best practices for distribution: pinned versions in hook/MCP commands (no floating `latest`), signed release tags, a `CHANGELOG`, `proofmesh doctor` to check install + hook wiring + enforcement health, and `proofmesh uninstall <host>` that removes exactly what was added.
+Do not assume a single directory layout is compatible with every host. Verify each host's actual manifest precedence and plugin loader before claiming portability.
 
 ### 13.6 Enforcement caveat
 
@@ -810,15 +786,15 @@ MCP-only mode is advisory. A lifecycle hook can request continuation only to the
 
 ### 13.7 Three layers: guide, steer, gate
 
-Hooks are not a guarantee everywhere: Devin documents hooks as best effort and fail-open (plugin hooks only run in CLI/Desktop), and MCP-only hosts have no hooks. So ProofMesh never relies on one layer:
+ProofMesh separates three strengths of integration. They are architecture levels, not three features that must all ship tonight.
 
-| Layer | Mechanism | Strength | Hosts |
+| Layer | Mechanism | Strength | Hackathon status |
 |---|---|---|---|
-| Guide | skill + short rule + state card | advice | all |
-| Steer | MCP tools + lifecycle hooks (block writes, continue on Stop, re-anchor) | enforced where the host honours hooks | Antigravity, Claude Code, Codex, Devin CLI/Desktop, OpenCode (partial) |
-| Gate | `proofmesh verify --ci` status check + receipt on the PR; optional pre-push hook | independent of the agent; required check = cannot merge without `ACCEPTED` | any agent that produces a commit/PR, including cloud Devin |
+| Guide | MCP tools + compact state card/Agent Skill | Provides task, status, evidence and focused handoff; agent may ignore it | Required core interface plus one real client connection |
+| Steer | Native lifecycle hooks | Can block/request continuation only where host semantics support it | One verified host hook targeted |
+| Gate | Independent CI status check/receipt | Can gate repository integration when configured as a required check; does not stop local edits or chat claims | Future; explicitly not required for MVP |
 
-The enforcement report lists which layers are active per host. The gate re-runs trusted gates itself; it does not trust evidence uploaded by the agent.
+The final report must state which layers are active and what they can actually enforce. A Skill is guidance, not enforcement; MCP by itself is not a guarantee. A CI gate re-runs trusted checks against the target PR snapshot and must not trust agent-uploaded evidence.
 
 ### 13.8 Optional advisor: lightweight decision models (stretch only, off by default)
 
@@ -1002,7 +978,7 @@ Use explicit exit codes: `0` accepted/check pass; `1` policy blocker or failed c
 - Fix the issue, rerun checks, and reach `ACCEPTED` only after fresh evidence exists.
 - Modify source after a passing check and observe stale evidence.
 - Invoke the chosen host hook using an actual sample payload and validate host-specific response semantics.
-- Clean-install smoke test: `uvx proofmesh demo` on a fresh machine/CI runner with no network after install completes the seeded demo and writes `report.md` + `report.json`; the repo working tree is unchanged afterwards.
+- Clean-environment smoke test: `uv run proofmesh demo` after dependencies are installed completes the seeded demo and writes report.md + report.json; the core demo needs no model/API call or network, and the target repository working tree is unchanged afterwards.
 
 ### End-to-end demo test
 
@@ -1155,14 +1131,13 @@ Decisions taken earlier during ideation (retained for context; superseded items 
 - **D-29** Constraints: zero budget; developer hardware 8 GB RAM, i3 11th gen, no GPU. No required paid service or GPU anywhere in the MVP.
 - **D-16** ProofMesh enforces test obligations: tests with every change, new tests must run and fail on baseline, no test weakening (§6.3).
 
-Open questions:
+Open questions (ordered for implementation):
 
-1. **Hook payloads in Antigravity for VS Code and Devin CLI:** plugins load (developer-confirmed for Antigravity VS Code); capture hook payloads as golden files (§19 step 0).
-2. **One folder, two hook layouts:** confirm each host loads only its own manifest/hooks from `plugin/`; else split into per-host subfolders.
-7. **Cloud Devin hooks:** whether Customize → Hooks run a local `uvx` command on the session VM reliably enough to count as `PARTIAL`; until verified, cloud Devin is guide + MCP + CI gate.
-3. **TaskFile grammar details:** exact AC/invariant/assumption line syntax.
-4. **Digest normalization:** which Markdown changes count as "cosmetic" vs. intent changes.
-5. **Checks that write files:** redirect caches per tool vs. run checks on a temporary worktree.
-6. **Check cost:** baseline gates at session start plus fail-on-baseline runs add time; allow reusing results for an unchanged snapshot?
-8. **Advisor accuracy:** build a small labelled set (agent messages, tests) and measure Laya on it before trusting any ADV threshold; measure latency on the developer's i3.
-9. **MCP sampling:** which hosts (Antigravity, Devin, Claude Code) let an MCP server ask the host model for a completion.
+1. **First host adapter:** which installed host has an available hook with a verifiable input/output contract right now? Capture one real payload/response and add it as a golden fixture. Do not implement other adapters before this works.
+2. **TaskFile grammar:** finalize exact acceptance-criterion, invariant and scope syntax; add one valid and one invalid fixture.
+3. **Code-state fingerprint:** define the smallest safe fingerprint for the demo (tracked diff plus relevant file contents/config; include untracked files). Document conservative invalidation behavior.
+4. **Check isolation:** which environment variables/caches should be removed or redirected so checks have bounded side effects without mutating the target worktree?
+5. **Baseline semantics:** how should a gate with a pre-existing failure affect acceptance? For the demo, use a clean deterministic fixture; later support explicit waivers/inconclusive baseline states.
+6. **Hook failure policy:** for each actual hook, decide behavior on missing DB, timeout, invalid payload and internal error. Report unknown/unavailable rather than silently accepting.
+7. **Optional advisor:** only after the core passes twice from a clean state; test one narrow question and measure latency/accuracy. Skip it if it adds network, account or setup risk.
+8. **Host packaging:** plugin layout, universal installer, cloud Devin hooks and MCP-sampling behavior remain future research unless required by the chosen host.
