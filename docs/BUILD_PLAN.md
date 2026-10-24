@@ -28,11 +28,11 @@ A judge should be able to see the approved contract, what changed, why the task 
 
 ### Checkpoint 1 — Package and persistent state
 
-- [ ] Minimal package configuration, strict Pydantic models and default trusted policy.
-- [ ] SQLite schema/store for task revisions, sessions, events, evidence and decisions.
-- [ ] Parameterized SQL, transaction boundaries, stable IDs and schema version.
-- [ ] Per-user data directory outside the target repository.
-- [ ] A test proves state survives a new process.
+- [x] Minimal package configuration, strict Pydantic models and default trusted policy.
+- [x] SQLite schema/store for task revisions, sessions, events, evidence and decisions.
+- [x] Parameterized SQL, transaction boundaries, stable IDs and schema version.
+- [x] Per-user data directory outside the target repository.
+- [x] A test proves state survives a new process.
 
 **Exit condition:** One task/event/evidence round-trip works. Do not build hash-chain audit, a daemon, ORM, remote database, or backup UX tonight.
 

@@ -1,5 +1,13 @@
 # Change log
 
+## 2026-10-24T23:38:37+05:30 — Complete Checkpoint 1 package and persistent state
+
+- **Changed:** Created minimal package configuration (`pyproject.toml`) specifying Python `>=3.14,<3.15` per TRD §2 while documenting Python 3.12 local environment compatibility. Implemented strict domain models with Pydantic v2 in `src/proofmesh/models/` (`StrictModel`, `FrozenModel`, constrained types for IDs, SHA-256 digests, UTC timestamps, and entity models: `TaskRevision`, `Session`, `EventRecord`, `EvidenceRecord`, `VerdictRecord`). Implemented minimal SQLite storage in `src/proofmesh/storage/` (`store.py`, `paths.py`, `migrations.py`, and `migrations/001_init.sql`) with parameterized SQL, short explicit write transactions (`BEGIN IMMEDIATE`/`COMMIT`/`ROLLBACK`), WAL mode, foreign keys, secure directory/file permissions (`0700`/`0600`), and revalidation on read. Added comprehensive tests in `tests/test_strict_models.py` and `tests/test_sqlite_persistence.py`.
+- **Why:** Satisfies Checkpoint 1 requirements and TRD §5.6 / §14: ensures all data entering the system is strictly validated, immutable where appropriate, and transactionally persisted to SQLite outside the project repository.
+- **Validation:** Executed `pytest tests/` (18 passed in 1.12s); tested strict rejection of extra fields, type coercion, naive timestamps, and malformed IDs; verified round-trip entity persistence, transaction rollback, foreign-key integrity, tamper detection, and multi-process persistence survival via subprocess invocation.
+- **Test result:** 18 passed in 1.12s via pytest on Python 3.12.3.
+- **Limitations:** Python 3.14 runtime is not locally installed; tests executed on Python 3.12.3 using Python-3.14-compatible syntax and dependencies. Hash-chain tamper evidence and database backup commands deferred per §0 scope lock.
+
 ## 2026-10-24T23:15:00+05:30 — Complete Checkpoint 0 integration spike for Google Antigravity
 
 - **Changed:** Performed the time-boxed Checkpoint 0 integration spike. Confirmed Google Antigravity CLI (`agy` 1.4.7) is the installed host in the environment. Created and verified a live MCP stdio server/client round-trip using the official `mcp` SDK (`initialize`, `tools/list`, and `tools/call`). Captured real sanitized lifecycle hook payloads from `agy` execution (`PreInvocation`, `PreToolUse`, `Stop`). Verified real host response semantics: `PreToolUse` returning `deny` actually halted tool execution with the custom reason presented to the agent; `Stop` returning `continue` forced execution continuation. Added sanitized golden fixtures (`tests/fixtures/host_payloads/antigravity/` and `tests/fixtures/mcp/`) and automated tests (`tests/test_integration_spike.py`).

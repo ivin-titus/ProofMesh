@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "proofmesh"
+version = "0.1.0"
+description = "Intent, intervention, and evidence control layer for AI-assisted software development"
+readme = "README.md"
+# TRD §2 target runtime specification. See AI_USAGE.md / CHANGELOG.md for local environment notes.
+requires-python = ">=3.14,<3.15"
+license = { text = "MIT" }
+authors = [{ name = "ProofMesh Contributors" }]
+dependencies = [
+    "pydantic>=2.10.0,<3.0.0",
+    "mcp>=2.3.0,<3.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "anyio>=4.0.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
