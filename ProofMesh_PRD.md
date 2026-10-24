@@ -1,7 +1,7 @@
 # ProofMesh — Product Requirements Document (PRD)
 
-**Version:** 0.2 (ideation draft)  
-**Status:** Hackathon MVP specification — under active ideation on branch `devin/ideation`  
+**Version:** 0.3 (scope-locked hackathon build)  
+**Status:** Scope-locked hackathon MVP specification — build may start; long-term vision is explicitly separated  
 **Last updated:** 2026-10-24  
 **Product type:** Agent-neutral intent, intervention, and evidence control layer for AI-assisted software development
 
@@ -96,28 +96,47 @@ This is a product hypothesis, not a claim that the overall category or any indiv
 
 ## 6. Goals and non-goals
 
-### 6.1 Hackathon goals
+### 6.1 Demo goal: prove one complete control loop
 
-- Demonstrate a working TaskFile contract and prevent silent edits to an approved revision.
-- Compare repository changes against task scope and explain suspicious changes.
-- Execute real, configured checks and connect results to acceptance criteria.
-- Detect a repeated failing check and stop unproductive automatic continuation within a defined retry budget.
-- Mark evidence stale when relevant code changes.
-- Expose core operations through MCP and integrate one real lifecycle hook.
-- Produce a clear, machine-readable verdict and human-readable report.
-- Demonstrate a compact, structured handoff that preserves relevant context.
-- Include a browser smoke test for a UI-affecting sample task if the end-to-end core is stable.
+The demo must show a real, coherent workflow—not a collection of stubbed capabilities:
 
-### 6.2 Non-goals for MVP
+1. A developer approves a bounded TaskFile contract.
+2. ProofMesh records the repository baseline and detects a deliberate scope violation or relevant change.
+3. ProofMesh runs at least one real, configured check and binds its result to the approved contract revision and the code snapshot checked.
+4. A failed mandatory gate or repeated failure keeps the task unaccepted and produces a focused, actionable handoff.
+5. One real agent integration can access ProofMesh; one verified lifecycle hook is used if the initial integration spike confirms it works.
+6. After the issue is corrected, fresh evidence changes the deterministic verdict from blocked to accepted.
+7. A human-readable and JSON report explains what happened and the integration's actual enforcement level.
 
-- Building or replacing a coding-agent harness, IDE, issue tracker, CI platform, or multi-agent orchestrator.
-- Universal integrations with every coding agent or guarantees over uninstrumented subagents.
-- Full cross-language static analysis or a complete semantic dependency graph.
-- Proving program correctness in the formal-methods sense.
-- Executing arbitrary commands proposed by an LLM.
-- Broad autonomous root-cause analysis across production logs, databases, traces, and every framework.
-- Fully autonomous edits to the task contract or repository policy.
-- Cloud service, team accounts, remote telemetry, or ProofMesh-hosted evidence storage.
+The core demonstration must be repeatable without relying on an LLM spontaneously making a specific mistake. Use a prepared fixture with seeded failures for the primary scripted scenario. Then show the same mechanism with the live host agent where feasible.
+
+### 6.2 MVP non-goals
+
+Do not make these prerequisites for the hackathon demo:
+
+- A universal agent installer or support for several native hook formats.
+- CI status checks or PR comments on GitHub.
+- Full multi-agent scheduling, orchestration, worktree isolation or guaranteed attribution of subagent actions.
+- A semantic dependency graph across arbitrary languages and frameworks.
+- Comprehensive test-obligation enforcement, mutation testing or autonomous root-cause analysis.
+- A new browser automation engine, a full dashboard, or an IDE.
+- A bundled/hosted model, decision model, or required network call.
+- Team accounts, cloud storage, remote telemetry, or a distributed service.
+- Full cross-language architecture analysis or formal proof of program correctness.
+
+### 6.3 Demo scope versus product vision
+
+**Hackathon core (must ship):** TaskFile approval and revision integrity; Git snapshot/scope report; one allowlisted check runner; evidence freshness; deterministic verdict; bounded repeated-failure detection; compact handoff; MCP access; one real host integration; persistent local state; readable/JSON report.
+
+**Stretch only after the end-to-end flow passes repeatedly:** one existing Playwright smoke test for a UI-affecting change OR one optional decision-advisor call for a narrowly typed question. Do not attempt both unless there is clear spare time. The decision advisor may only add a warning or request review; it must never approve work or override deterministic gates.
+
+**Long-term vision:** additional host adapters, stronger write-time controls, CI/merge gates, decision-model integrations, richer API/database/log/browser verification, multi-agent handoffs, stepwise refactors, test-quality analysis, policy packs, and a verification-plugin ecosystem. The architecture should leave room for these without requiring them now.
+
+The prototype is successful when the core control loop is real and understandable. Feature count and framework breadth are secondary.
+
+### 6.4 Explicit scope-control rule
+
+A proposed feature belongs in the MVP only if it is needed to demonstrate Intent, Intervention, or Evidence in the single end-to-end flow. If it adds another independent subsystem, host integration, remote service, or orchestration responsibility, defer it unless the core is already reliable.
 
 ## 7. Core product model
 
@@ -187,41 +206,34 @@ Profiles also set the **human-in-the-loop line**: ProofMesh decides routine matt
 
 ## 9. Functional requirements
 
-Priority definitions: **P0** = necessary for the hackathon end-to-end demo; **P1** = only after the P0 flow is stable; **Future** = architecture should not prevent it, but it is not promised in the demo.
+Priority definitions: **P0 — build now**; **P1 — stretch after the end-to-end flow is reliable**; **Future — preserve as roadmap, do not implement for this demo**. This priority table is authoritative if other sections describe broader capabilities.
 
 | ID | Priority | Requirement | Acceptance condition |
 |---|---|---|---|
-| FR-01 | P0 | Create a TaskFile for a task | Structured Markdown contract parses and validates into objective, acceptance criteria, scope/risk fields, gates, revision and digest; invalid structure is rejected with line-level errors. |
-| FR-02 | P0 | Preserve approved intent | An agent cannot silently modify an approved revision; amendments require a new revision and approval event. |
-| FR-03 | P0 | Inspect changes | Compare the start baseline with current tracked and untracked files; report changed paths and scope findings. |
-| FR-04 | P0 | Run configured checks | Only configured gate IDs can invoke checks; each produces a structured result, timeout status and evidence record. |
-| FR-05 | P0 | Bind evidence to code state | Evidence identifies the contract revision and a code-state fingerprint; relevant changes invalidate or mark evidence stale. |
-| FR-06 | P0 | Evaluate completion | Return a deterministic verdict from contract, evidence, policy, and integration health. |
-| FR-07 | P0 | Detect repeated failure | Detect repeated normalized failures or no progress; stop automatic retries after a configurable budget. |
-| FR-08 | P0 | Expose core through MCP | A compatible agent can read the contract, inspect changes, run configured verification, retrieve status and request a handoff. |
-| FR-09 | P0 | Integrate lifecycle hooks (Antigravity and Claude-style: Claude Code, Codex, Devin CLI) | A supported hook records an event and checks completion status; continuation is bounded and documented. |
-| FR-10 | P0 | Show enforcement coverage | Report `ENFORCED`, `PARTIAL`, or `UNGUARDED` based on adapter capabilities and health. |
-| FR-11 | P0 | Generate a compact handoff | Include objective, contract revision, changed paths, current code state, failed checks, prior attempts, unresolved assumptions and required next action. |
-| FR-12 | P1 | Trigger browser verification on UI changes | If a configured UI path changes, run a configured Playwright smoke test or explicitly report UI verification unavailable. |
-| FR-13 | P1 | Guided/Flow/Strict profiles | Profile changes explanations and intervention behavior without bypassing mandatory gates. |
-| FR-14 | Future | Multi-worktree/subagent tracking | Attribute events where available and verify the final integrated snapshot. |
-| FR-15 | Future | Broad plugin ecosystem | Add typed adapters for more agents and verification providers without changing core policy logic. |
-| FR-16 | P0 | Lightweight native install | Installs with `uv tool install`/`uvx` on Python 3.14 with no external services; ProofMesh never writes to the repo working tree. |
-| FR-17 | P0 | Safe local storage | The SQLite database (stdlib driver, hand-written parameterized SQL) lives in a protected per-user data directory outside the workspace, survives restarts, supports consistent backups and detects tampering of append-only records. |
-| FR-18 | P0 | ProofMesh-owned TaskFiles | Agents can only propose tasks/amendments; every revision results from a recorded ProofMesh decision (policy rule or user approval). |
-| FR-20 | P0 | Mode-based human approvals | Critical decisions are queued for the developer per the profile matrix; agents cannot approve; waivers are explicit and labelled in reports. |
-| FR-21 | P0 | Task kinds with baseline-relative evidence | `feature`, `bugfix` (requires a fail-to-pass gate) and `refactor` (requires invariants; pass → fail is a regression) are supported. |
-| FR-22 | P1 | Multiple host adapters | Codex, Claude Code, Devin, Google Antigravity and OpenCode map to one hook protocol (golden-file tested); other MCP tools work in advisory mode. |
-| FR-23 | P0 | Test obligations | Mapped code changes require test changes; new tests must run, and (bugfix / opted-in features) fail on baseline; test deletion, skips and count drops need approval. |
-| FR-24 | P0 | Project initialisation | `proofmesh init` detects the stack from files (no code execution) and writes a proposed policy for the developer to approve; works for projects other than the demo. |
-| FR-25 | P0 | Architecture rules as checks | Rules added gradually in policy; violations name file, line, rule and forbidden import; Python checked built-in, other languages via configured tools. |
-| FR-26 | P0 | One-step install | One package in the repo's `plugin/` subfolder (hooks, MCP server, Agent Skill, short rule, pinned versions) installs by pasting the repo link into supported agents; `proofmesh install <host>` as fallback with exact `uninstall`; `proofmesh doctor` reports what each host loaded. |
-| FR-27 | P0 | Evidence-cited completion | `claim_complete` requires each acceptance criterion to cite evidence IDs; uncited, stale, failed or mismatched citations are listed and block acceptance. |
-| FR-28 | P0 | CI verdict on the PR | `proofmesh verify --ci` re-runs trusted gates on the PR head and posts status + receipt; works for agents without hooks (e.g. cloud Devin). |
-| FR-29 | P1 (first cut if time is short) | Stepwise refactor + change budget | Ordered refactor steps; only the current step is writable; next step unlocks after verification; over-budget changes ask the developer. |
-| FR-30 | P0 | Context re-anchoring | Compact state card injected at session start, after compaction and on handoff between agents. |
-| FR-31 | P1 | Optional advisor | Off by default; one config line points at a `systemone` endpoint (self-hosted Laya or hosted Jev); answers can only escalate (warn/ask), never accept; failures change nothing; answers labelled advisory. |
-| FR-19 | P0 | Review-ready submission | One-command offline demo produces Markdown + JSON reports; README claims map to code and tests; CI is green. |
+| FR-01 | P0 | Propose and approve a TaskFile | A structured Markdown task validates into objective, acceptance criteria, scope, required gates and constraints; the user can approve it through a simple CLI flow. |
+| FR-02 | P0 | Preserve intent revisions | Approved contracts are immutable; an amendment proposal cannot silently change the approved revision. A new approval creates a new revision and digest. |
+| FR-03 | P0 | Snapshot repository changes | Record a baseline and report tracked/untracked changes and suspicious paths relative to the task scope. Do not claim semantic certainty from path matching alone. |
+| FR-04 | P0 | Run configured verification | Only trusted, preconfigured gate IDs can run. Each check has a timeout and bounded output and produces a structured result. |
+| FR-05 | P0 | Preserve evidence integrity/freshness | Evidence records identify contract revision, check/config and code fingerprint. A relevant later change marks the evidence stale. |
+| FR-06 | P0 | Evaluate acceptance deterministically | Mandatory failed, stale, missing or unknown evidence cannot produce `ACCEPTED`. Agent self-report remains distinct from ProofMesh's verdict. |
+| FR-07 | P0 | Detect repeated failures | Repeated normalized failure or no progress triggers a bounded intervention and compact handoff; it cannot create an unbounded completion-hook loop. |
+| FR-08 | P0 | Expose core actions through MCP | A connected agent can read the task, inspect status, request configured verification, retrieve the verdict and request a handoff. |
+| FR-09 | P0 | Integrate one real lifecycle hook | Select one host only after a short compatibility spike. The hook records a real event and checks status/requests continuation where the host supports it. Never fake a host integration. |
+| FR-10 | P0 | Declare enforcement coverage | Report `ENFORCED`, `PARTIAL`, or `UNGUARDED` according to the actual adapter capabilities and health. |
+| FR-11 | P0 | Create a compact handoff | Include approved intent/revision, code state, changed paths, blockers, exact relevant failure, previous attempts, unresolved assumptions and next action. |
+| FR-12 | P0 | Persist state safely | SQLite state lives outside the target workspace; revisions/events/evidence are committed transactionally and survive process restarts. ProofMesh itself does not mutate the project working tree. |
+| FR-13 | P0 | Validate trust boundaries | Strict models validate TaskFile, policy, MCP and hook inputs. Only allowlisted commands/gates may run; timeout and output limits are enforced. |
+| FR-14 | P0 | Provide repeatable demo/report | One command runs a prepared, network-independent core scenario and produces Markdown + JSON reports. Seeded/simulated events are labelled as such. |
+| FR-15 | P1 | Browser smoke verification | Reuse an existing Playwright test/script for a UI-affecting task. If unavailable, explicitly report UI verification as unverified. No new browser automation framework. |
+| FR-16 | P1 — stretch | Optional decision advisor | One optional, narrow typed question may return an advisory warning/request-review result. It is off by default, never accepts work, and failure/unavailability does not affect deterministic gates. |
+| FR-17 | P1 — stretch | Guided/Flow/Strict profiles | Profiles alter explanation and interruption policy, not truth of evidence or mandatory gate outcomes. A minimal preset is enough. |
+| FR-18 | Future | CI/PR verdict and receipt | Re-run trusted checks against the final PR snapshot and report verdict independent of agent hooks. |
+| FR-19 | Future | More host adapters and universal installation | Add adapters only after their actual hook payloads and response semantics are verified with golden-file tests. |
+| FR-20 | Future | Multi-worktree/subagent tracking | Attribute events where available and verify the integrated final snapshot; report unknown attribution honestly. |
+| FR-21 | Future | Advanced test obligations and test-quality checks | Detect missing/weak tests, test deletion/skips and fail-on-baseline bugs with explicit handling for flaky or inconclusive results. |
+| FR-22 | Future | Project auto-initialization and architecture rules | Detect stacks without executing repository code, propose a policy for approval, and add language-specific rule providers. |
+| FR-23 | Future | Stepwise refactors and change budgets | Unlock ordered refactor steps only after verification; require approval when a configured change budget is exceeded. |
+| FR-24 | Future | Team policy packs and verification plugin ecosystem | Add typed verification providers and reusable repository policies without changing the core evaluator.
 
 ## 10. Quality gates
 
@@ -270,27 +282,34 @@ The report should show a timeline, scope findings, gate outcomes, intervention c
 
 ## 13. Success metrics
 
-### Hackathon success criteria
+### Hackathon exit criteria (must pass)
 
-- Demonstrate one real agent integration end-to-end.
-- Catch a deliberate scope violation.
-- Catch a deliberately failing or weak verification condition.
-- Detect repeated failure and stop automatic continuation within the configured budget.
-- Show evidence becoming stale after a relevant edit.
-- Show a task transition from blocked to accepted only after required checks pass.
-- Browser smoke test executes when configured and relevant, or the report explicitly shows that browser verification is unavailable.
-- Complete the demo without network connectivity being required for the core verification path, except for the chosen agent/LLM itself.
+- The prepared demo runs end-to-end after installation without a required model/API call for the core path.
+- An approved TaskFile cannot be silently amended by an agent.
+- A deliberate scope finding is visible and tied to the task contract.
+- A real configured check runs and its result is recorded against a code-state fingerprint.
+- A mandatory failure, stale result, or unknown mandatory gate blocks acceptance.
+- A relevant edit invalidates earlier evidence.
+- Repeated failure reaches a configured retry limit and produces a useful handoff without looping indefinitely.
+- One real host integration is demonstrated. A native hook counts only if its actual payload and response were verified; otherwise declare the integration partial and demonstrate the supported MCP/CLI path honestly.
+- The final report explains the verdict, gate evidence, enforcement coverage, and remaining unknowns.
 
-### Future product metrics
+### Stretch indicators
 
-- Rate of unintended scope changes caught before acceptance.
-- Percentage of completion decisions supported by fresh evidence.
-- Repeat-failure loops prevented and average retries avoided.
-- Median verification overhead and context tokens saved in supported handoffs.
-- False-positive rate of scope and loop findings.
-- Percentage of sessions accurately classified by enforcement capability.
+- One existing Playwright smoke test captures a meaningful UI assertion.
+- OR one optional decision-advisor call improves a narrowly scoped warning/question while deterministic policy remains authoritative.
+- A compact handoff is reused by a second agent or fresh session without losing contract and failure context.
 
-Do not claim quality improvement from these metrics until they are measured against a baseline.
+### Future product metrics (measure before making claims)
+
+- Unintended scope changes caught before acceptance.
+- Share of acceptance criteria backed by fresh, relevant evidence.
+- Repeated-failure loops avoided and retries saved.
+- Verification latency and context size reduced in supported handoffs.
+- False-positive rates for scope and no-progress findings.
+- Percentage of sessions with accurately reported enforcement coverage.
+
+Do not claim productivity or quality improvements until measured against a baseline.
 
 ## 14. Risks and mitigations
 
@@ -308,28 +327,41 @@ Do not claim quality improvement from these metrics until they are measured agai
 
 ## 15. Demo narrative
 
-The demo uses the developer's **real social media app**, which is mid-refactor: a vibe-coded, over-engineered codebase being simplified into something boring with clear layers. The agent is **Google Antigravity (VS Code extension)** with a smaller model, installed via the ProofMesh plugin, which is exactly where agents break architecture rules on large changes and ignore AGENTS.md.
+### Primary demo: one visible, repeatable control loop
 
-0. **Setup:** install the plugin, run `proofmesh init` on the app, approve the proposed policy, add a couple of real architecture rules.
-1. **Contract:** the developer approves a `refactor` TaskFile for one real refactor step: target structure, invariants (existing tests), architecture rules as a boundary gate, restricted paths, test obligations.
-2. **Baseline:** ProofMesh records baseline gate results, including pre-existing failures.
-3. **Agent works** in Antigravity; ProofMesh injects a short contract reminder.
-4. **Write-time block:** the agent tries to edit a restricted file or a protected test → `PreToolUse` denies or asks the developer.
-5. **Architecture:** the boundary gate catches a layer violation → `BLOCKED`, with the exact import named.
-6. **Tests:** code changed without tests, or a new test that also passes on the old code → "not done" with the missing evidence.
-7. **Stop hook:** the agent says "done" → ProofMesh replies `continue: <what is missing>`; after the budget, retries stop and a handoff is written.
-8. **Freshness:** a later edit makes earlier passing evidence `STALE`.
-9. **Accepted:** invariants show no regression, boundary gate and test obligations pass, every criterion cites fresh evidence, simplification metrics shown → developer confirms → `ACCEPTED`. Show the enforcement coverage report.
-10. **Second agent, same contract:** the next refactor step is handed to Devin with the state card; Devin opens a PR; the ProofMesh CI check posts the verdict and receipt on it (blocked until evidence passes).
+Use a prepared sample repository with an intentional scope/verification failure. The demo must work even if the live agent behaves perfectly or the network is unavailable.
 
-Because a live agent may not misbehave on cue, keep a recorded run and its exported reports as backup. Label any replayed or seeded events as such.
+1. **Intent:** propose and approve a refactor or bug-fix TaskFile with a small set of acceptance criteria and one scope restriction.
+2. **Baseline:** record the starting code fingerprint and baseline check result.
+3. **Intervention:** introduce or demonstrate a change outside declared scope, and show a scope finding tied to the task.
+4. **Verification:** run a real configured test/check, retain its bounded output, and associate it with the criterion and code state.
+5. **Failure:** make the required check fail; ProofMesh reports `BLOCKED`, not accepted.
+6. **Loop protection:** repeat the same failure signature until the configured budget is reached; ProofMesh stops automatic retries and provides a focused handoff.
+7. **Freshness:** change relevant code after a passing check and show the prior evidence becomes `STALE`.
+8. **Recovery:** fix the issue, rerun verification and show fresh evidence changing the verdict to `ACCEPTED`.
+9. **Integration:** show a real agent asking ProofMesh for status/verification and one real hook event if verified. The report displays the actual enforcement level.
+
+### Optional live extension
+
+If the core is stable, run one of the same checks against the developer's real social-media project through Antigravity. Then choose **one** stretch feature: a Playwright UI smoke test or a narrow decision-advisor call. Do not depend on the real repository or a live model making a particular mistake for the main story.
+
+Keep a recorded run and exported reports as backup; label any seeded/replayed events. The decision model, if shown, is advisory only and must never replace the deterministic verdict.
 
 ## 16. Roadmap
 
-- **MVP:** single local repository, TaskFile, scope analysis, configured checks, evidence freshness, repeated-failure detection, MCP, one lifecycle hook and completion report.
-- **Next:** Playwright plugin, profiles, richer API/runtime diagnostics, better dependency mapping, improved task amendment workflow.
-- **Later:** multi-worktree and subagent event attribution, additional coding-agent adapters, policy packs, CI/merge gates, plugin SDK, team policy management.
-- **Long-term vision:** intent-and-evidence continuity across multi-agent implementation, testing, review, deployment and incident follow-up—without taking over agent orchestration.
+### Hackathon demo — current scope
+
+One local repository, one approved TaskFile, Git scope analysis, one allowlisted check runner, evidence freshness, deterministic verdict, bounded failure-loop detection, compact handoff, SQLite persistence, MCP interface, one validated host integration, and Markdown/JSON report.
+
+### Next iteration
+
+Existing Playwright smoke-check provider, simple operating profiles, optional advisory decision-model integration, richer check providers, project initialization, and improved architecture/test-obligation checks.
+
+### Long-term vision
+
+Additional hook and agent adapters; CI and merge gates; multi-worktree/subagent event attribution; policy packs and verification plugins; richer runtime diagnostics across APIs, databases, logs and traces; test-quality/mutation analysis; stepwise refactor budgets; team policy management.
+
+The long-term ecosystem is an intent-to-evidence continuity layer across agent handoffs—not a new coding-agent harness or task orchestrator. The MVP must not attempt to implement the entire roadmap.
 
 ## 17. Assumptions and open decisions
 
@@ -339,14 +371,14 @@ Because a live agent may not misbehave on cue, keep a recorded run and its expor
 - SQLite is the only store; scope is limited to what the hackathon demo needs.
 - The submission is evaluated by a jury and an AI code reviewer.
 - Detailed decisions and open questions are tracked in TRD §23.
-- One native lifecycle integration is required; broader agent coverage is not.
+- One native lifecycle integration is the target; the first compatibility spike chooses the host. Antigravity VS Code is the preferred demo target, but if the actual hook contract cannot be verified quickly, use a host whose hook can be demonstrated and report all other integrations as unsupported/partial.
 - The MVP does not provide formal correctness proofs.
 - User approval can be represented by an explicit local CLI/UI action plus a contract digest; cryptographic identity is future work.
 - A completion hook may request continuation but cannot guarantee that the agent will obey forever or prevent a separate chat message claiming completion.
-- ProofMesh targets any MCP + hooks tool; Codex, Claude Code, Google Antigravity and OpenCode are the initial hook targets. Google Antigravity (VS Code extension) is the demo host; VS Code hook/plugin support must be verified first.
+- The core is designed to be agent-neutral. The hackathon implementation validates one host only; Codex, Claude Code, Google Antigravity, OpenCode and Devin remain adapter targets, not implied MVP support.
 
 - **Constraints:** zero budget; developer hardware is 8 GB RAM, i3 11th gen, no GPU. The MVP needs no paid service, GPU or bundled model. ProofMesh runs only when the host starts it (hook processes, stdio MCP server, CI job).
-- **Advisor models** (Laya/Jev) are optional and advisory; measured Laya on CPU at ~0.7–0.8 s per call and ~2.8 GB RAM, so they are used only at completion, in CI or on demand (TRD §13.8).
+- A decision-model advisor (for example, via the optional SystemOne/Laya/Jev path described in the TRD) is a stretch feature only. It must not be required for the core demo, increase mandatory resource/network requirements, or override deterministic acceptance gates.
 
 ## 18. Reference links
 
