@@ -1,5 +1,13 @@
 # Change log
 
+## 2026-10-24T22:37:08+05:30 — Repair TRD section structure after consistency check
+
+- **Changed:** Rebuilt `docs/TRD.md` from the prior clean version and reapplied the scope reconciliation. The TRD now has one copy of each major section, a single relative-time implementation plan, and explicit MVP/future boundaries.
+- **Why:** The post-commit structural check found that the previous TRD edit had duplicated later sections. This correction restores a coherent, navigable technical spec.
+- **Validation:** Counted major headings and verified the legacy wall-clock schedule and contradictory all-five-MVP statement are absent. Rechecked the updated scope, review assumptions, host configuration notes, and relative timeline.
+- **Test result:** Documentation-only correction; no runtime tests were run because implementation has not started.
+- **Limitations:** Organizer deadline details remain to be checked against current communications.
+
 ## 2026-10-24T22:31:24+05:30 — Remove optional template scaffolding and reconcile MVP scope
 
 - **Changed:** Removed standalone `RULES.md` and the optional GitHub pull-request template. Folded essential workflow guidance into `AGENTS.md`; refreshed README and submission notes; removed template-specific event caveats; clarified Devin/ChatGPT contributions in `AI_USAGE.md`. Corrected TRD statements that promoted deferred refactor/CI features to MVP scope, clarified the future-only CI/PR gate and plugin installation notes, removed unconfirmed assumptions about an AI code reviewer, and converted the stale wall-clock schedule to relative time boxes.
