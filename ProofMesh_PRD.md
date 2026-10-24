@@ -43,7 +43,7 @@ Testing, code review, agent governance, MCP tooling, and lifecycle hooks exist i
 
 **What it adds that skills and rule files don't:** evidence-cited completion (every acceptance criterion must cite fresh, passing evidence), stepwise refactors with a change budget, task state re-injected after context loss or agent switch, focused failure digests with loop detection, and a verdict + receipt on the PR that holds even when an agent has no hooks (TRD §6.6, §13.7).
 
-**Agent-neutral:** one package installed by pasting the repo link into Antigravity, Devin, Claude Code, Codex and others; MCP everywhere, hooks where supported, CI gate always.
+**Agent-neutral long-term goal:** one stable core exposed through MCP, with native hooks where supported and a CI acceptance gate for workflows that produce commits/PRs. The MVP validates one host integration; universal install, multiple native adapters, and CI enforcement are roadmap items.
 
 **Differentiation to demonstrate:** continuity of task intent and verification evidence across code changes and agent handoffs—not merely a browser tester, generic code reviewer, agent router, or pass/fail test runner.
 
