@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 CREATE TABLE IF NOT EXISTS task_revisions (
     task_id TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
     revision INTEGER NOT NULL,
+    parent_revision INTEGER,
     summary TEXT NOT NULL,
     acceptance_criteria_json TEXT NOT NULL,
     scope_json TEXT NOT NULL,
@@ -24,7 +25,17 @@ CREATE TABLE IF NOT EXISTS task_revisions (
     approved_by TEXT,
     approved_at TEXT,
     contract_digest TEXT NOT NULL,
+    raw_markdown TEXT,
     PRIMARY KEY (task_id, revision)
+);
+
+CREATE TABLE IF NOT EXISTS snapshots (
+    snapshot_id TEXT PRIMARY KEY,
+    repo_root TEXT NOT NULL,
+    git_commit TEXT,
+    git_dirty INTEGER NOT NULL,
+    files_json TEXT NOT NULL,
+    captured_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS sessions (

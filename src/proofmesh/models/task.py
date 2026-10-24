@@ -48,6 +48,7 @@ class ScopePolicy(FrozenModel):
 class TaskRevision(FrozenModel):
     task_id: Identifier
     revision: int = Field(ge=1)
+    parent_revision: int | None = Field(default=None, ge=1)
     summary: str = Field(min_length=1, max_length=2000)
     acceptance_criteria: tuple[AcceptanceCriterion, ...] = Field(default_factory=tuple)
     scope: ScopePolicy = Field(default_factory=ScopePolicy)
@@ -58,6 +59,7 @@ class TaskRevision(FrozenModel):
     approved_by: str | None = Field(default=None, max_length=128)
     approved_at: datetime | None = None
     contract_digest: Sha256Digest
+    raw_markdown: str | None = Field(default=None, max_length=65536)
 
     @field_validator("acceptance_criteria", "required_gates", "constraints", mode="before")
     @classmethod

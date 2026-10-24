@@ -38,15 +38,15 @@ Read the project documents before implementation changes:
 
 ## Subagents and parallel implementation
 
-Use isolated subagents when they increase verification or implementation quality, but do not turn ProofMesh itself into an agent orchestrator.
+Use isolated subagents when they increase implementation speed and verification quality, but do not turn ProofMesh itself into an agent orchestrator.
 
-- Keep one main agent responsible for architecture decisions, shared interfaces, integration, merge decisions and the final full-suite run.
-- Prefer one read-only reviewer plus one implementer in a separate branch/worktree. Normal concurrency should be capped at two or three agents because each extra agent adds context, tool calls and review/merge cost.
-- Parallelize only bounded, genuinely independent tasks with explicit file ownership and agreed input/output contracts. Good candidates include a read-only security review, the pure TaskFile parser after its model contract is fixed, and repository snapshot/scope logic after its data contract is agreed.
-- Do not run parallel edits to shared models, migrations, storage APIs or public interfaces. The main agent resolves those contracts first.
-- Require every subagent to report changed files, assumptions, exact commands/checks, actual test results, known limitations and a reviewable diff/commit. Never treat an isolated passing test as proof that the integrated tree passes.
-- Integrate deliberately in the parent worktree and rerun relevant tests after merge. Preserve user changes and never reset/clean a worktree to resolve conflicts.
-- Keep subagent usage as a developer workflow only; multi-agent orchestration, guaranteed attribution and worktree coordination are not MVP product features.
+- **High-Parallelism Workflow:** Work is partitioned into bounded features. Each feature implementation subagent operates in an isolated Git worktree (`Workspace: "branch"`), owning only their designated files and tests.
+- **Main Agent Integration:** One main agent is solely responsible for architecture decisions, shared data models (`src/proofmesh/models/`), storage schema and migrations, API contract publication (`docs/CORE_API_CONTRACTS.md`), review, integration, merge decisions, and final full-suite runs.
+- **Explicit Contracts & Disjoint Ownership:** Parallelize only bounded, genuinely independent tasks with explicit file ownership and published interface contracts. Feature agents must not edit shared models, migrations, or another agent's modules.
+- **Independent Read-Only Review:** A dedicated read-only auditor subagent reviews boundaries, fail-open paths, command security, and test gaps concurrently without making overlapping file edits.
+- **Accountability & Verification:** Every subagent must report changed files, assumptions, exact commands/checks, actual test results, known limitations, and reviewable diffs.
+- **Deliberate Integration:** The main agent merges completed branches incrementally into the main tree, reconciles semantic differences, and reruns relevant and full test suites.
+- Keep subagent usage strictly as a developer workflow; multi-agent orchestration, worktree coordination, and model dispatch are not MVP product features.
 
 ## Documentation and collaboration
 

@@ -20,12 +20,19 @@ from proofmesh.models.policy import (
     ScopeDefaultPolicy,
     TrustedPolicy,
 )
+from proofmesh.models.scope import (
+    PathChange,
+    ScopeAnalysisResult,
+    ScopeChangeType,
+    ScopeFinding,
+)
 from proofmesh.models.session import (
     IntegrationStatus,
     OperatingProfile,
     Session,
     SessionState,
 )
+from proofmesh.models.snapshot import FileFingerprint, RepoSnapshot
 from proofmesh.models.task import (
     AcceptanceCriterion,
     ApprovalStatus,
@@ -45,14 +52,20 @@ __all__ = [
     "EventRecord",
     "EvidenceRecord",
     "EvidenceStatus",
+    "FileFingerprint",
     "FrozenModel",
     "GatePolicy",
     "Identifier",
     "ImmutableDict",
     "IntegrationStatus",
     "OperatingProfile",
+    "PathChange",
+    "RepoSnapshot",
     "RiskLevel",
+    "ScopeAnalysisResult",
+    "ScopeChangeType",
     "ScopeDefaultPolicy",
+    "ScopeFinding",
     "ScopePolicy",
     "Session",
     "SessionState",
@@ -62,7 +75,9 @@ __all__ = [
     "TrustedPolicy",
     "VerdictOutcome",
     "VerdictRecord",
+    "freeze_value",
     "to_immutable_dict",
     "to_immutable_tuple",
+    "unfreeze_value",
     "validate_utc_datetime",
 ]

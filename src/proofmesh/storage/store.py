@@ -12,8 +12,10 @@ from proofmesh.models import (
     EventRecord,
     EvidenceRecord,
     EvidenceStatus,
+    FileFingerprint,
     IntegrationStatus,
     OperatingProfile,
+    RepoSnapshot,
     RiskLevel,
     ScopePolicy,
     Session,
@@ -143,14 +145,19 @@ class ProofMeshStore:
             conn.execute(
                 """
                 INSERT INTO task_revisions (
-                    task_id, revision, summary, acceptance_criteria_json,
+                    task_id, revision, parent_revision, summary, acceptance_criteria_json,
                     scope_json, required_gates_json, constraints_json,
-                    risk_level, approval_status, approved_by, approved_at, contract_digest
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    risk_level, approval_status, approved_by, approved_at, contract_digest, raw_markdown
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(task_id, revision) DO UPDATE SET
+                    approval_status = excluded.approval_status,
+                    approved_by = excluded.approved_by,
+                    approved_at = excluded.approved_at;
                 """,
                 (
                     revision.task_id,
                     revision.revision,
+                    revision.parent_revision,
                     revision.summary,
                     ac_json,
                     scope_json,
@@ -161,6 +168,7 @@ class ProofMeshStore:
                     revision.approved_by,
                     approved_at_str,
                     revision.contract_digest,
+                    revision.raw_markdown,
                 ),
             )
 
@@ -170,9 +178,9 @@ class ProofMeshStore:
         try:
             row = conn.execute(
                 """
-                SELECT task_id, revision, summary, acceptance_criteria_json,
+                SELECT task_id, revision, parent_revision, summary, acceptance_criteria_json,
                        scope_json, required_gates_json, constraints_json,
-                       risk_level, approval_status, approved_by, approved_at, contract_digest
+                       risk_level, approval_status, approved_by, approved_at, contract_digest, raw_markdown
                 FROM task_revisions
                 WHERE task_id = ? AND revision = ?;
                 """,
@@ -192,9 +200,9 @@ class ProofMeshStore:
         try:
             rows = conn.execute(
                 """
-                SELECT task_id, revision, summary, acceptance_criteria_json,
+                SELECT task_id, revision, parent_revision, summary, acceptance_criteria_json,
                        scope_json, required_gates_json, constraints_json,
-                       risk_level, approval_status, approved_by, approved_at, contract_digest
+                       risk_level, approval_status, approved_by, approved_at, contract_digest, raw_markdown
                 FROM task_revisions
                 WHERE task_id = ?
                 ORDER BY revision ASC;
@@ -218,6 +226,7 @@ class ProofMeshStore:
         return TaskRevision(
             task_id=row["task_id"],
             revision=row["revision"],
+            parent_revision=row["parent_revision"],
             summary=row["summary"],
             acceptance_criteria=ac_list,
             scope=scope,
@@ -228,6 +237,7 @@ class ProofMeshStore:
             approved_by=row["approved_by"],
             approved_at=approved_at,
             contract_digest=row["contract_digest"],
+            raw_markdown=row["raw_markdown"],
         )
 
     # -------------------------------------------------------------------------
@@ -302,6 +312,61 @@ class ProofMeshStore:
                 state=SessionState(row["state"]),
                 started_at=datetime.fromisoformat(row["started_at"]),
                 ended_at=ended_at,
+            )
+        finally:
+            conn.close()
+
+    # -------------------------------------------------------------------------
+    # Snapshots
+    # -------------------------------------------------------------------------
+
+    def save_snapshot(self, snapshot: RepoSnapshot) -> None:
+        """Persist a repository snapshot."""
+        files_json = json.dumps([f.model_dump(mode="json") for f in snapshot.files])
+        with self.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO snapshots (
+                    snapshot_id, repo_root, git_commit, git_dirty, files_json, captured_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(snapshot_id) DO NOTHING;
+                """,
+                (
+                    snapshot.snapshot_id,
+                    snapshot.repo_root,
+                    snapshot.git_commit,
+                    1 if snapshot.git_dirty else 0,
+                    files_json,
+                    snapshot.captured_at.isoformat(),
+                ),
+            )
+
+    def get_snapshot(self, snapshot_id: str) -> RepoSnapshot | None:
+        """Retrieve and validate a repository snapshot."""
+        conn = self.get_connection()
+        try:
+            row = conn.execute(
+                """
+                SELECT snapshot_id, repo_root, git_commit, git_dirty, files_json, captured_at
+                FROM snapshots
+                WHERE snapshot_id = ?;
+                """,
+                (snapshot_id,),
+            ).fetchone()
+
+            if not row:
+                return None
+
+            raw_files = json.loads(row["files_json"])
+            files = [FileFingerprint.model_validate(f) for f in raw_files]
+
+            return RepoSnapshot(
+                snapshot_id=row["snapshot_id"],
+                repo_root=row["repo_root"],
+                git_commit=row["git_commit"],
+                git_dirty=bool(row["git_dirty"]),
+                files=files,
+                captured_at=datetime.fromisoformat(row["captured_at"]),
             )
         finally:
             conn.close()
