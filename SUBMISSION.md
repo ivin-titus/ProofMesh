@@ -50,6 +50,6 @@ This is a project-specific working record, not an event-provided template. Confi
   - `PROOFMESH_DB`: Optional override for SQLite database path outside repository.
 - **Actual libraries/APIs/data sources:** Pydantic v2, official MCP Python SDK (`mcp`), standard library `sqlite3` and `http.server`. Zero external cloud services, model APIs, or paid subscriptions required for the core control loop.
 - **Demo walkthrough and access requirements:**
-  1. Run `proofmesh demo --dir demo_target` to execute the 9-phase control loop.
+  1. Run `proofmesh demo --dir demo_target` to execute the 10-phase control loop.
   2. Inspect generated Markdown report in `demo_target/report.md` and JSON receipt in `demo_target/report.json`.
   3. Start `proofmesh ui` to view the live responsive status panel at `http://127.0.0.1:8765/`.

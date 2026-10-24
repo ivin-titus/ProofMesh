@@ -1,9 +1,10 @@
-"""Integration and lifecycle tests for ProofMesh Seeded Demo Flow (Checkpoint 6).
+"""Integration and lifecycle tests for ProofMesh Seeded Demo Flow (Checkpoint 6 & 10).
 
 Validates:
-- Full 9-phase deterministic seeded demo without LLM/network calls.
-- Initial clean edits pass verification and evaluator produces ALLOW.
+- Full 10-phase deterministic seeded recovery demo without LLM/network calls.
+- Task contract proposal and approval workflow.
 - Out-of-scope / restricted file edits produce BLOCK with reasons and handoff card.
+- Safe recovery: revert restricted edit, implement allowed changes, run real pytest.
 - Markdown report and JSON receipt exported with tamper-evident digests.
 - Deterministic repeatability: demo runs cleanly twice in a row on the same directory.
 """
@@ -24,7 +25,7 @@ from proofmesh.report import export_json_receipt, render_markdown_report
 
 
 def test_seeded_demo_end_to_end(tmp_path: Path):
-    """Test full 9-phase seeded demo execution in an isolated environment."""
+    """Test full 10-phase seeded recovery demo execution in an isolated environment."""
     target_dir = tmp_path / "demo_repo"
     db_file = tmp_path / "storage" / "proofmesh_demo.db"
 
