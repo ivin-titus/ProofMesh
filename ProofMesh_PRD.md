@@ -1,7 +1,7 @@
 # ProofMesh — Product Requirements Document (PRD)
 
-**Version:** 0.1  
-**Status:** Hackathon MVP specification  
+**Version:** 0.2 (ideation draft)  
+**Status:** Hackathon MVP specification — under active ideation on branch `devin/ideation`  
 **Last updated:** 2026-10-24  
 **Product type:** Agent-neutral intent, intervention, and evidence control layer for AI-assisted software development
 
@@ -48,9 +48,11 @@ This is a product hypothesis, not a claim that the overall category or any indiv
 3. **Honest enforcement:** distinguish advice, observed controls, lifecycle enforcement, and external merge gates. Never claim a session is guarded when the integration is unhealthy or incomplete.
 4. **Deterministic decisions where possible:** checks, thresholds, evidence freshness, and hard gates are evaluated by code; use an LLM only for bounded interpretation and explanations.
 5. **No harness creep:** ProofMesh does not own agent planning, model selection, task scheduling, or code generation.
-6. **Local-first by default:** source, logs, task contracts, and evidence remain local unless the user explicitly configures sharing.
+6. **Local-first by default:** source, logs, task contracts, and evidence remain local unless the user explicitly configures sharing (e.g. an opt-in remote Postgres/Neon database).
 7. **Least privilege:** never execute arbitrary model-generated commands or repository code without explicit policy and isolation.
 8. **Lower interaction noise, not lower quality:** modes may reduce interruptions and context size, but do not silently waive mandatory gates.
+9. **Runtime data safety:** every input from agents, hooks, files, config or storage is validated against a strict schema before use; invalid data fails closed.
+10. **Portable by default:** runs as one lightweight container with no host dependencies beyond a container runtime.
 
 ## 5. Target users and jobs to be done
 
@@ -101,13 +103,13 @@ This is a product hypothesis, not a claim that the overall category or any indiv
 - Executing arbitrary commands proposed by an LLM.
 - Broad autonomous root-cause analysis across production logs, databases, traces, and every framework.
 - Fully autonomous edits to the task contract or repository policy.
-- Cloud service, team accounts, remote telemetry, or hosted evidence storage.
+- Cloud service, team accounts, remote telemetry, or ProofMesh-hosted evidence storage. (A user-configured remote database such as Neon is supported as an opt-in storage backend; it is not a ProofMesh-operated service.)
 
 ## 7. Core product model
 
 ### 7.1 Intent
 
-A TaskFile is the approved task contract. It captures:
+A TaskFile is the approved task contract, written as a **structured Markdown file** (small YAML front matter plus fixed sections) so it is easy for both people and LLMs to read and draft, while staying strictly machine-parseable. It captures:
 
 - Task ID and revision.
 - User objective and explicit non-goals.
@@ -115,7 +117,7 @@ A TaskFile is the approved task contract. It captures:
 - Allowed/restricted paths or change categories, where useful.
 - Required verification gates.
 - Constraints, assumptions, risk level, and approval requirements.
-- Approval metadata and contract digest.
+- Approval metadata and contract digest (stored by ProofMesh, not trusted from the editable file).
 
 For a precise request, ProofMesh can propose a contract directly. For a vague request (e.g., "notifications are broken"), the agent can perform bounded, read-only investigation and propose a likely cause, plan, scope, risks, and acceptance criteria. The user approves the implementation contract or clarifies consequential ambiguity before implementation proceeds. The user is authorizing the objective and constraints; the agent discovers the solution.
 
@@ -171,7 +173,7 @@ Priority definitions: **P0** = necessary for the hackathon end-to-end demo; **P1
 
 | ID | Priority | Requirement | Acceptance condition |
 |---|---|---|---|
-| FR-01 | P0 | Create a TaskFile for a task | Contract contains objective, acceptance criteria, scope/risk fields, gates, revision and digest. |
+| FR-01 | P0 | Create a TaskFile for a task | Structured Markdown contract parses and validates into objective, acceptance criteria, scope/risk fields, gates, revision and digest; invalid structure is rejected with line-level errors. |
 | FR-02 | P0 | Preserve approved intent | An agent cannot silently modify an approved revision; amendments require a new revision and approval event. |
 | FR-03 | P0 | Inspect changes | Compare the start baseline with current tracked and untracked files; report changed paths and scope findings. |
 | FR-04 | P0 | Run configured checks | Only configured gate IDs can invoke checks; each produces a structured result, timeout status and evidence record. |
@@ -186,6 +188,9 @@ Priority definitions: **P0** = necessary for the hackathon end-to-end demo; **P1
 | FR-13 | P1 | Guided/Flow/Strict profiles | Profile changes explanations and intervention behavior without bypassing mandatory gates. |
 | FR-14 | Future | Multi-worktree/subagent tracking | Attribute events where available and verify the final integrated snapshot. |
 | FR-15 | Future | Broad plugin ecosystem | Add typed adapters for more agents and verification providers without changing core policy logic. |
+| FR-16 | P0 | Run as a portable container | The full flow runs from one container image with the repo mounted read-only and state persisted outside the repo. |
+| FR-17 | P0 | Safe local storage | The SQLite database lives in a protected data directory outside the workspace, survives restarts, supports consistent backups and detects tampering of append-only records. |
+| FR-18 | P1 | Pluggable database backend | The same core runs against Postgres (e.g. Neon) when a database URL is configured, with TLS and secrets handled safely. |
 
 ## 10. Quality gates
 
@@ -294,7 +299,9 @@ Use deterministic seeded cases so the demonstration does not depend on an LLM ma
 ## 17. Assumptions and open decisions
 
 - MVP is local-first and focused on a prepared repository.
-- Python is the primary implementation language for the prototype.
+- Python 3.14 is the implementation language; Pydantic v2 (strict) provides runtime validation.
+- ProofMesh is distributed and run as a single lightweight container image.
+- SQLite is the default store; a remote Postgres (e.g. Neon) is opt-in. Detailed open questions are tracked in TRD §22.
 - One native lifecycle integration is required; broader agent coverage is not.
 - The MVP does not provide formal correctness proofs.
 - User approval can be represented by an explicit local CLI/UI action plus a contract digest; cryptographic identity is future work.
