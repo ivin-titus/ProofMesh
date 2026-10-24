@@ -589,8 +589,6 @@ Each adapter declares capabilities such as:
 
 Capabilities are reported as facts, not inferred from MCP availability.
 
-### 13.2 First adapter
-
 ### 13.2 Host adapters (agent-neutral)
 
 ProofMesh must work with any tool that supports MCP and/or lifecycle hooks. Integration has two layers:
