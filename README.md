@@ -6,7 +6,15 @@ ProofMesh is designed to keep coding agents aligned with an approved task, detec
 
 ## Project status
 
-**Planning/specification only on this branch. Runtime implementation has not started.** The commands and architecture described in the specifications are design targets, not working features. There is no runnable app or demo yet.
+**Core package, strict models, and persistent storage implemented.**
+- **Checkpoint 0 (Integration spike):** Verified Google Antigravity CLI (`agy` 1.4.7) lifecycle hooks (`PreInvocation`, `PreToolUse`, `Stop`) with denial and continuation semantics, plus live stdio MCP client/server round-trip.
+- **Checkpoint 1 & 1.1 (Package, migrations, and persistent state):**
+  - Package configured via `pyproject.toml` and pinned via `uv.lock` for CPython 3.14 (also validated on Python 3.12).
+  - Strict Pydantic v2 models with UTC-normalized timestamps, bounded fields, and immutable nested containers (`tuple`, `MappingProxyType`) preventing in-place mutations.
+  - Minimal trusted policy configuration in `config/default-policy.toml` and loader in `proofmesh.config`.
+  - Transactional SQLite migrations with atomic schema upgrades, rollback on failure, and rejection of future schema versions. Built wheel package verified to package and execute migrations.
+  - Parameterized SQLite store with secure directory permissions (`0700`), file permissions (`0600`), and path-traversal prevention.
+- **Remaining checkpoints (Checkpoints 2–8):** TaskFile parsing/approval, repository snapshots/scope, verification providers, evaluator/verdicts, and CLI/demo orchestration are active/upcoming milestones.
 
 ## Documentation
 
@@ -19,9 +27,9 @@ ProofMesh is designed to keep coding agents aligned with an approved task, detec
 - [Change log](CHANGELOG.md) — significant project changes and validation.
 - [Submission status](SUBMISSION.md) — project details and outstanding demo/submission checklist.
 
-## Planned implementation
+## Implementation and runtime
 
-The current design targets Python 3.14, Pydantic v2, SQLite, the MCP Python SDK, and `uv`. These are planned choices, not verified installed dependencies. The implementation should stay local-first, use minimal dependencies, and avoid a required hosted model, paid service, Docker runtime, or network dependency for the core demo.
+The runtime is implemented with Python 3.14 (`requires-python = "==3.14.*"` in `pyproject.toml` and `uv.lock`, validated on both CPython 3.14.9 and host Python 3.12.3), Pydantic v2, standard library SQLite, the official MCP Python SDK, and `uv`. The implementation is strictly local-first with zero external hosted model, paid service, Docker, or network dependencies for the core demo and testing.
 
 ## Intended demo
 

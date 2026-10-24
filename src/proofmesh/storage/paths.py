@@ -1,5 +1,42 @@
+import errno
 import os
 from pathlib import Path
+import re
+
+PROJECT_ID_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$")
+
+
+def validate_project_id(project_id: str, base_dir: Path | None = None) -> str:
+    """Validate project_id format and ensure it cannot escape the projects directory."""
+    if not isinstance(project_id, str):
+        raise ValueError(f"project_id must be a string, got {type(project_id).__name__}")
+
+    if not project_id or not PROJECT_ID_PATTERN.match(project_id):
+        raise ValueError(f"Invalid project_id '{project_id}': must match pattern ^[a-zA-Z0-9][a-zA-Z0-9_.-]{{0,63}}$")
+
+    if ".." in project_id or "/" in project_id or "\\" in project_id or "\0" in project_id:
+        raise ValueError(f"Path traversal detected in project_id: '{project_id}'")
+
+    if base_dir is not None:
+        projects_dir = (Path(base_dir).resolve() / "projects")
+        resolved = (projects_dir / project_id).resolve()
+        if resolved.parent != projects_dir:
+            raise ValueError(f"Resolved path escapes projects directory: '{project_id}'")
+
+    return project_id
+
+
+def _secure_directory(dir_path: Path) -> None:
+    """Create directory with 0700 permissions; fail if permission is denied."""
+    dir_path.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(dir_path, 0o700)
+    except PermissionError as e:
+        raise PermissionError(f"Cannot set secure permissions (0700) on {dir_path}: {e}") from e
+    except OSError as e:
+        if e.errno not in (errno.ENOSYS, getattr(errno, "EOPNOTSUPP", 95)):
+            # Ignore only if filesystem doesn't support chmod (e.g. FAT/exFAT)
+            pass
 
 
 def get_proofmesh_data_dir(create: bool = False) -> Path:
@@ -21,28 +58,23 @@ def get_proofmesh_data_dir(create: bool = False) -> Path:
             data_dir = (Path.home() / ".local" / "share" / "proofmesh").resolve()
 
     if create:
-        try:
-            data_dir.mkdir(parents=True, exist_ok=True)
-            os.chmod(data_dir, 0o700)
-        except OSError:
-            pass
+        _secure_directory(data_dir)
 
     return data_dir
 
 
 def get_project_db_path(project_id: str, base_dir: Path | None = None) -> Path:
-    """Return the SQLite database path for a given project."""
+    """Return the SQLite database path for a given project, strictly validating the project ID."""
     if base_dir is None:
         base_dir = get_proofmesh_data_dir(create=True)
     else:
         base_dir = Path(base_dir).resolve()
 
+    # Validate against traversal
+    validate_project_id(project_id, base_dir=base_dir)
+
     project_dir = base_dir / "projects" / project_id
-    try:
-        project_dir.mkdir(parents=True, exist_ok=True)
-        os.chmod(project_dir, 0o700)
-    except OSError:
-        pass
+    _secure_directory(project_dir)
 
     return project_dir / "proofmesh.db"
 
@@ -52,5 +84,8 @@ def secure_db_file(db_path: Path) -> None:
     if db_path.exists():
         try:
             os.chmod(db_path, 0o600)
-        except OSError:
-            pass
+        except PermissionError as e:
+            raise PermissionError(f"Cannot set secure permissions (0600) on {db_path}: {e}") from e
+        except OSError as e:
+            if e.errno not in (errno.ENOSYS, getattr(errno, "EOPNOTSUPP", 95)):
+                pass

@@ -9,7 +9,7 @@ description = "Intent, intervention, and evidence control layer for AI-assisted 
 readme = "README.md"
 # TRD §2 target runtime specification. See AI_USAGE.md / CHANGELOG.md for local environment notes.
 requires-python = ">=3.14,<3.15"
-license = { text = "MIT" }
+license = "MIT"
 authors = [{ name = "ProofMesh Contributors" }]
 dependencies = [
     "pydantic>=2.10.0,<3.0.0",
@@ -21,6 +21,12 @@ dev = [
     "pytest>=8.0.0",
     "anyio>=4.0.0",
 ]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"proofmesh.storage.migrations" = ["*.sql"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

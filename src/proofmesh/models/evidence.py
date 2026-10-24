@@ -6,6 +6,7 @@ from proofmesh.models.base import (
     FrozenModel,
     Identifier,
     Sha256Digest,
+    to_immutable_tuple,
     validate_utc_datetime,
 )
 
@@ -23,7 +24,7 @@ class EvidenceRecord(FrozenModel):
     session_id: Identifier
     contract_revision: int = Field(ge=1)
     gate_id: Identifier
-    acceptance_criteria: list[CriterionId] = Field(default_factory=list, max_length=50)
+    acceptance_criteria: tuple[CriterionId, ...] = Field(default_factory=tuple)
     provider_name: str = Field(min_length=1, max_length=128)
     provider_version: str = Field(min_length=1, max_length=64)
     config_digest: Sha256Digest
@@ -36,6 +37,11 @@ class EvidenceRecord(FrozenModel):
     exit_code: int | None = None
     summary: str = Field(min_length=1, max_length=5000)
     invalidation_reason: str | None = Field(default=None, max_length=1000)
+
+    @field_validator("acceptance_criteria", mode="before")
+    @classmethod
+    def convert_criteria(cls, v: object) -> object:
+        return to_immutable_tuple(v)
 
     @field_validator("started_at")
     @classmethod

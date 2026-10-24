@@ -25,7 +25,12 @@ from proofmesh.models import (
     VerdictOutcome,
     VerdictRecord,
 )
-from proofmesh.storage import ProofMeshStore, get_proofmesh_data_dir, get_project_db_path
+from proofmesh.storage import (
+    ProofMeshStore,
+    get_proofmesh_data_dir,
+    get_project_db_path,
+)
+from proofmesh.storage.paths import validate_project_id
 
 SAMPLE_DIGEST = "sha256:" + "b" * 64
 
@@ -70,7 +75,7 @@ def test_roundtrip_all_entities(temp_store: ProofMeshStore):
     assert loaded_rev.task_id == "task-42"
     assert loaded_rev.revision == 1
     assert loaded_rev.acceptance_criteria[0].criterion_id == "AC-1"
-    assert loaded_rev.scope.allow_paths == ["src/**", "tests/**"]
+    assert loaded_rev.scope.allow_paths == ("src/**", "tests/**")
     assert loaded_rev.approval_status == ApprovalStatus.APPROVED
     assert loaded_rev.approved_by == "human-reviewer"
 
@@ -142,6 +147,7 @@ def test_roundtrip_all_entities(temp_store: ProofMeshStore):
     assert isinstance(loaded_ev, EvidenceRecord)
     assert loaded_ev.status == EvidenceStatus.PASSED
     assert loaded_ev.duration_ms == 450
+    assert loaded_ev.acceptance_criteria == ("AC-1",)
 
     # 5. Verdict Record
     verdict = VerdictRecord(
@@ -161,7 +167,8 @@ def test_roundtrip_all_entities(temp_store: ProofMeshStore):
     assert loaded_verd is not None
     assert isinstance(loaded_verd, VerdictRecord)
     assert loaded_verd.verdict == VerdictOutcome.ALLOW
-    assert loaded_verd.evidence_ids == ["ev-202"]
+    assert loaded_verd.reasons == ("All mandatory gates passed",)
+    assert loaded_verd.evidence_ids == ("ev-202",)
 
 
 def test_foreign_key_violation_fails_safely(temp_store: ProofMeshStore):
@@ -285,3 +292,28 @@ print('SEPARATE_PROCESS_SUCCESS')
         check=True,
     )
     assert "SEPARATE_PROCESS_SUCCESS" in result.stdout
+
+
+def test_project_id_traversal_rejected(tmp_path: Path):
+    """Verify that path traversal attempts in project_id are strictly rejected."""
+    traversal_ids = ["../outside", "../../escape", "/root/bad", "proj/sub", "proj\\win", "bad\0byte", ""]
+    for bad_id in traversal_ids:
+        with pytest.raises(ValueError):
+            validate_project_id(bad_id, base_dir=tmp_path)
+        with pytest.raises(ValueError):
+            get_project_db_path(bad_id, base_dir=tmp_path)
+
+
+def test_transaction_connection_closed_on_error(temp_store: ProofMeshStore):
+    """Verify that a failed transaction explicitly closes the database connection."""
+    with pytest.raises(RuntimeError):
+        with temp_store.transaction() as conn:
+            raise RuntimeError("Failure inside transaction")
+
+    # The store connection was closed in finally block; new connection works cleanly
+    conn2 = temp_store.get_connection()
+    try:
+        assert conn2.execute("PRAGMA schema_version;").fetchone() is not None
+    finally:
+        conn2.close()
+

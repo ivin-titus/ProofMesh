@@ -1,7 +1,9 @@
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from proofmesh.config import get_default_policy, load_policy
 from proofmesh.models import (
     AcceptanceCriterion,
     ApprovalStatus,
@@ -16,6 +18,7 @@ from proofmesh.models import (
     Session,
     SessionState,
     TaskRevision,
+    TrustedPolicy,
     VerdictOutcome,
     VerdictRecord,
 )
@@ -36,7 +39,6 @@ def test_strict_model_extra_fields_forbidden():
 
 def test_strict_model_rejects_type_coercion():
     """Verify strict mode forbids implicit type coercion."""
-    # revision must be an int, not string '1'
     with pytest.raises(ValidationError) as exc:
         TaskRevision(
             task_id="task-1",
@@ -82,7 +84,7 @@ def test_timezone_normalized_to_utc():
 
 
 def test_malformed_id_rejected():
-    """Verify IDs must conform to the allowed identifier pattern."""
+    """Verify IDs must conform to TRD §5.6 lowercase identifier pattern."""
     with pytest.raises(ValidationError) as exc:
         TaskRevision(
             task_id="INVALID/ID/WITH/SLASHES",
@@ -105,8 +107,8 @@ def test_malformed_digest_rejected():
     assert "string_pattern_mismatch" in str(exc.value)
 
 
-def test_frozen_model_immutability():
-    """Verify FrozenModel instances cannot be modified in-place."""
+def test_frozen_model_attribute_reassignment_blocked():
+    """Verify FrozenModel instances cannot have attributes reassigned."""
     revision = TaskRevision(
         task_id="task-1",
         revision=1,
@@ -115,3 +117,66 @@ def test_frozen_model_immutability():
     )
     with pytest.raises(ValidationError):
         revision.summary = "Modified summary"  # type: ignore[misc]
+
+
+def test_nested_container_immutability():
+    """Verify that nested lists and mappings cannot be mutated in place after validation."""
+    ac = AcceptanceCriterion(
+        criterion_id="AC-1",
+        description="Requirement 1",
+        required_gates=["gate-lint"],
+    )
+    scope = ScopePolicy(allow_paths=["src/**"], restricted_paths=[".git/**"])
+    revision = TaskRevision(
+        task_id="task-1",
+        revision=1,
+        summary="Initial summary",
+        acceptance_criteria=[ac],
+        scope=scope,
+        required_gates=["gate-lint"],
+        constraints=["no-network"],
+        contract_digest=SAMPLE_DIGEST,
+    )
+
+    # 1. Mutating acceptance_criteria in-place must fail
+    with pytest.raises(AttributeError):
+        revision.acceptance_criteria.append(ac)  # type: ignore[attr-defined]
+
+    with pytest.raises(TypeError):
+        revision.acceptance_criteria[0] = ac  # type: ignore[index]
+
+    # 2. Mutating required_gates in-place must fail
+    with pytest.raises(AttributeError):
+        revision.required_gates.append("gate-test")  # type: ignore[attr-defined]
+
+    # 3. Mutating scope allow_paths in-place must fail
+    with pytest.raises(AttributeError):
+        revision.scope.allow_paths.append("evil/**")  # type: ignore[attr-defined]
+
+    # 4. Mutating event payload in-place must fail
+    event = EventRecord(
+        event_id="evt-1",
+        session_id="sess-1",
+        source_adapter="test",
+        event_type="test",
+        occurred_at=datetime.now(timezone.utc),
+        summary="test event",
+        payload={"immutable_key": "initial_value"},
+    )
+    with pytest.raises(TypeError):
+        event.payload["immutable_key"] = "tampered"  # type: ignore[index]
+
+    with pytest.raises(AttributeError):
+        event.payload.update({"new_key": "val"})  # type: ignore[attr-defined]
+
+
+def test_default_policy_validation():
+    """Verify that default trusted policy loads and validates correctly."""
+    policy = get_default_policy()
+    assert isinstance(policy, TrustedPolicy)
+    assert policy.schema_version == 1
+    assert policy.profile == OperatingProfile.FLOW
+    assert policy.budget.max_retries == 3
+    assert "test" in policy.gates
+    assert policy.gates["test"].provider == "pytest"
+    assert policy.gates["test"].mandatory is True

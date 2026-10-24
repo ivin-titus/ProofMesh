@@ -1,0 +1,29 @@
+# ProofMesh Default Trusted Policy
+schema_version = 1
+profile = "flow"
+
+[budget]
+max_retries = 3
+max_continuation_steps = 10
+max_changed_files = 50
+
+[scope]
+default_allow_paths = ["src/**", "tests/**"]
+default_restricted_paths = [".git/**", ".github/**"]
+
+[gates.test]
+provider = "pytest"
+command = ["pytest"]
+timeout_seconds = 60
+mandatory = true
+
+[gates.lint]
+provider = "ruff"
+command = ["ruff", "check"]
+timeout_seconds = 30
+mandatory = false
+
+[advisor]
+enabled = false
+protocol = "systemone"
+timeout_ms = 2000

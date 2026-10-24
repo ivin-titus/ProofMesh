@@ -1,8 +1,8 @@
 # ProofMesh — Hackathon Build Plan
 
 **Status:** Active build checklist  
-**Working branch:** hackathon/template-compliance  
-**Updated at:** 2026-10-24T22:31:24+05:30  
+**Working branch:** main  
+**Updated at:** 2026-10-25T00:03:00+05:30  
 **Deadline noted for planning:** October 25, 2026, 11:00 IST; confirm against current organizer communications. A live remaining-time countdown is intentionally omitted because it quickly becomes stale.  
 **Authority:** [PRD](PRD.md) defines product behavior and priorities; [TRD](TRD.md) §0 and §20 define the technical MVP boundary; this plan defines implementation order and cut lines. Follow [AGENTS.md](../AGENTS.md) for workflow and safety practices. Roadmap and historical ideation notes must not expand the MVP beyond the explicit scope lock.
 
@@ -33,6 +33,14 @@ A judge should be able to see the approved contract, what changed, why the task 
 - [x] Parameterized SQL, transaction boundaries, stable IDs and schema version.
 - [x] Per-user data directory outside the target repository.
 - [x] A test proves state survives a new process.
+
+**Checkpoint 1.1 Review & Repair (Completed):**
+- [x] Lockfile `uv.lock` generated for CPython 3.14 without relaxing `requires-python = "==3.14.*"`.
+- [x] Package data configured in `pyproject.toml`; wheel build verified to package and execute migrations.
+- [x] SQLite migrations hardened with atomic schema upgrade/rollback and rejection of future schema versions.
+- [x] Restrictive directory (`0700`) and database file (`0600`) permissions with path traversal prevention.
+- [x] In-place mutation gap closed using immutable tuples and MappingProxyType on domain models.
+- [x] Default trusted policy TOML created and verified.
 
 **Exit condition:** One task/event/evidence round-trip works. Do not build hash-chain audit, a daemon, ORM, remote database, or backup UX tonight.
 

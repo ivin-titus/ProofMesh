@@ -1,9 +1,11 @@
 from datetime import datetime
-from typing import Any
+from types import MappingProxyType
 from pydantic import Field, field_validator
 from proofmesh.models.base import (
     FrozenModel,
     Identifier,
+    ImmutableDict,
+    to_immutable_dict,
     validate_utc_datetime,
 )
 
@@ -23,9 +25,16 @@ class EventRecord(FrozenModel):
     snapshot_after: Identifier | None = None
     summary: str = Field(min_length=1, max_length=2000)
     payload_schema_version: int = Field(default=1, ge=1)
-    payload: dict[str, Any] = Field(default_factory=dict)
+    payload: ImmutableDict = Field(default_factory=lambda: MappingProxyType({}))
 
     @field_validator("occurred_at")
     @classmethod
     def check_occurred_at(cls, v: datetime) -> datetime:
         return validate_utc_datetime(v)
+
+    @field_validator("payload", mode="before")
+    @classmethod
+    def convert_payload(cls, v: object) -> object:
+        if v is None:
+            return MappingProxyType({})
+        return to_immutable_dict(v)

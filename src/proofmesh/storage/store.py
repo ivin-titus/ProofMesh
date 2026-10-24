@@ -23,7 +23,7 @@ from proofmesh.models import (
     VerdictRecord,
 )
 from proofmesh.storage.migrations import apply_migrations
-from proofmesh.storage.paths import secure_db_file
+from proofmesh.storage.paths import secure_db_file, validate_project_id
 
 
 class ProofMeshStore:
@@ -79,6 +79,7 @@ class ProofMeshStore:
 
     def create_project(self, project_id: str, root_path: str, created_at: datetime | None = None) -> None:
         """Register a project."""
+        validate_project_id(project_id)
         ts = (created_at or datetime.now(timezone.utc)).isoformat()
         with self.transaction() as conn:
             conn.execute(
@@ -89,6 +90,7 @@ class ProofMeshStore:
 
     def get_project(self, project_id: str) -> dict[str, str] | None:
         """Retrieve project registration details."""
+        validate_project_id(project_id)
         conn = self.get_connection()
         try:
             row = conn.execute(
@@ -107,6 +109,7 @@ class ProofMeshStore:
 
     def create_task(self, task_id: str, project_id: str, created_at: datetime | None = None) -> None:
         """Create a task identity bound to a project."""
+        validate_project_id(project_id)
         ts = (created_at or datetime.now(timezone.utc)).isoformat()
         with self.transaction() as conn:
             conn.execute(
@@ -121,6 +124,7 @@ class ProofMeshStore:
 
     def save_task_revision(self, revision: TaskRevision, project_id: str) -> None:
         """Persist a task revision within an explicit transaction."""
+        validate_project_id(project_id)
         ac_json = json.dumps([ac.model_dump(mode="json") for ac in revision.acceptance_criteria])
         scope_json = json.dumps(revision.scope.model_dump(mode="json"))
         gates_json = json.dumps(revision.required_gates)
@@ -307,7 +311,7 @@ class ProofMeshStore:
 
     def save_event(self, event: EventRecord) -> None:
         """Persist an event record."""
-        payload_json = json.dumps(event.payload)
+        payload_json = json.dumps(dict(event.payload))
         with self.transaction() as conn:
             conn.execute(
                 """

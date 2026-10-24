@@ -4,6 +4,7 @@ from pydantic import Field, field_validator
 from proofmesh.models.base import (
     FrozenModel,
     Identifier,
+    to_immutable_tuple,
     validate_utc_datetime,
 )
 
@@ -29,9 +30,14 @@ class VerdictRecord(FrozenModel):
     snapshot_id: Identifier
     verdict: VerdictOutcome
     enforcement_level: EnforcementLevel
-    reasons: list[str] = Field(default_factory=list, max_length=100)
-    evidence_ids: list[Identifier] = Field(default_factory=list, max_length=100)
+    reasons: tuple[str, ...] = Field(default_factory=tuple)
+    evidence_ids: tuple[Identifier, ...] = Field(default_factory=tuple)
     evaluated_at: datetime
+
+    @field_validator("reasons", "evidence_ids", mode="before")
+    @classmethod
+    def convert_sequences(cls, v: object) -> object:
+        return to_immutable_tuple(v)
 
     @field_validator("evaluated_at")
     @classmethod
