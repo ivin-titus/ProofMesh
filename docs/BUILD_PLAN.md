@@ -1,9 +1,9 @@
 # ProofMesh — Hackathon Build Plan
 
 **Status:** Active build checklist  
-**Branch:** devin/ideation  
-**Time constraint:** Approximately 13 hours remained at the stated 21:50 start on October 24, with the submission deadline at 11:00 on October 25. Recalculate against the actual clock; the checklist is a prioritization tool, not a promise to implement every item.  
-**Authority:** The PRD defines product behavior; the TRD defines technical boundaries; this plan defines build order and cut lines.
+**Branch:** hackathon/template-compliance  
+**Updated at:** 2026-10-24T22:09:29+05:30. **Remaining time:** approximately 12 hours 53 minutes until the 11:00 IST deadline on October 25. The checkpoint schedule begins at the earlier 21:50 planning time; resume immediately at the current checkpoint and preserve the final freeze/submission buffer.  
+**Authority:** The PRD defines product behavior; the TRD defines technical boundaries; this plan defines build order and cut lines. Follow AGENTS.md and RULES.md for project workflow. The linked DevDay participant template describes a different event, so its event-specific requirements are not assumed to govern Devin Hacks.
 
 ## 1. The only outcome that matters tonight
 

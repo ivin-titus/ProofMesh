@@ -1,0 +1,33 @@
+# Local secrets (keep sanitized examples trackable)
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+
+# Python and tooling
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Local ProofMesh SQLite data and logs
+*.db
+*.db-shm
+*.db-wal
+*.log
+
+# Operating-system files
+.DS_Store
+Thumbs.db
