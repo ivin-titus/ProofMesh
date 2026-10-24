@@ -139,7 +139,7 @@ Notice scope status reports `✅ Clean (all changes within allowed scope)`.
 ### Step C: Execute Verification Gate
 Run allowlisted pytest:
 ```bash
-proofmesh verify pytest
+proofmesh verify test
 ```
 ProofMesh captures exit code, execution duration, and binds the SHA-256 code snapshot fingerprint to the evidence record.
 
@@ -153,7 +153,7 @@ proofmesh evaluate
 **Result:**
 - Evaluator halts with `❌ VERDICT: BLOCK`.
 - Scope violation reported: `backend/config/settings.env` matches `restricted_paths`.
-- Existing `pytest` evidence is automatically flagged as `stale` because code state changed after the check ran!
+- Existing `test` evidence is automatically flagged as `stale` because code state changed after the check ran!
 - Handoff card displays exact blockers and corrective actions.
 - Dashboard at `http://127.0.0.1:8765/` updates to red `❌ BLOCK` badge.
 
@@ -161,7 +161,7 @@ proofmesh evaluate
 Revert the unauthorized file and re-verify:
 ```bash
 rm backend/config/settings.env
-proofmesh verify pytest
+proofmesh verify test
 proofmesh evaluate
 ```
 

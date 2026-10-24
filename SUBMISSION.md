@@ -7,8 +7,8 @@ This is a project-specific working record, not an event-provided template. Confi
 - **Name:** ProofMesh
 - **Description:** An agent-neutral intent, intervention, and evidence control layer for AI-assisted software development. It preserves approved task intent, detects scope drift and repeated failures, and requires fresh verification evidence before accepting work.
 - **Repository:** https://github.com/ivin-titus/ProofMesh
-- **Working status:** Complete working MVP implementation with deterministic 10-phase seeded recovery demo, official MCP server over stdio, Antigravity host hook adapter, and local read-only status dashboard (`proofmesh ui`). All 15 security and PRD conformance audit findings fully resolved.
-- **Checks and verification:** 231/231 automated tests passing on target CPython 3.14.9; 176/176 tests passing on host Python 3.12.3. Full wheel packaging and migration round-trip verified.
+- **Working status:** Complete working MVP implementation with deterministic 10-phase seeded recovery demo, official MCP server over stdio, Antigravity host hook adapter, and local read-only status dashboard (`proofmesh ui`). All Checkpoints 0 through 10 fully implemented, hardened, and verified.
+- **Checks and verification:** 253/253 automated tests passing on target CPython 3.14.9; 205/205 tests passing on host Python 3.12.3. Full wheel packaging and migration round-trip verified.
 - **Working demo / run instructions:** See [README.md](README.md) and Section below.
 
 ## Participant
@@ -23,7 +23,7 @@ This is a project-specific working record, not an event-provided template. Confi
 - [x] README setup/run instructions have been tested from a clean setup.
 - [x] A repeatable end-to-end demo works and a fallback is available (`proofmesh demo`).
 - [x] AI assistance and reused components are documented accurately in [AI_USAGE.md](AI_USAGE.md).
-- [x] Checks actually run, their results, and known limitations are recorded (231/231 tests passing on CPython 3.14.9, 176/176 on Python 3.12.3).
+- [x] Checks actually run, their results, and known limitations are recorded (253/253 tests passing on CPython 3.14.9, 205/205 on Python 3.12.3).
 - [x] The final implementation commit SHA corresponds to the submitted demo.
 - [x] No secrets or private participant data are committed or shown.
 - [x] The current organizer's submission format and deadline have been followed.

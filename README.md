@@ -6,9 +6,9 @@ ProofMesh is designed to keep coding agents aligned with an approved task, detec
 
 ## Project status
 
-**Full MVP Control Loop Implemented, Security-Hardened & Verified (Checkpoints 0 through 8 + Security Stabilization).**
+**Full MVP Control Loop Implemented, Security-Hardened & Verified (Checkpoints 0 through 10 Complete).**
 
-- **Full Test Suite:** 231 automated tests passing on target CPython 3.14.9 (`.venv314`), 176 passing on host Python 3.12.3 (`.venv`).
+- **Full Test Suite:** 253 automated tests passing on target CPython 3.14.9 (`.venv314`), 205 passing on host Python 3.12.3 (`.venv`).
 - **Checkpoint 0 (Integration spike):** Verified Google Antigravity CLI (`agy` 1.4.7) lifecycle hooks (`PreInvocation`, `PreToolUse`, `Stop`) with denial and continuation semantics, plus live stdio MCP client/server round-trip.
 - **Checkpoint 1, 1.1 & 1.2 (Package, policy packaging, migrations, and persistent state):**
   - Package configured via `pyproject.toml` (`requires-python = ">=3.14,<3.15"`, locked via `uv.lock` for CPython 3.14, and verified on host Python 3.12).
@@ -58,8 +58,8 @@ proofmesh task approve <task-id> 1 --by alice --reason "Approved for implementat
 # Check active session and contract status
 proofmesh status
 
-# Run an allowlisted verification gate (e.g. pytest)
-proofmesh verify pytest
+# Run an allowlisted verification gate (e.g. test gate with pytest provider)
+proofmesh verify test
 
 # Evaluate session against scope, evidence, and policy
 proofmesh evaluate

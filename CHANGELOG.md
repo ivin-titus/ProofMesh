@@ -1,5 +1,40 @@
 # Change log
 
+## 2026-10-25T04:15:00+05:30 — Final Correctness, Invariant Enforcement, and Security Closure Milestone (Checkpoint 10)
+
+- **Changed:** Completed final correctness, invariant consistency, and security hardening across all core layers, adapters, and demo fixtures:
+  1. **Workstream A: Repository Snapshot Completeness (`proofmesh.core.repo_snapshot`)**:
+     - Captured traversal errors in directory walk (`onerror` callback) and filesystem examination.
+     - Automatically tracked unreadable files, broken symlinks, escaping symlinks, and non-file symlink targets.
+     - Set `complete = False` and populated bounded `observation_errors` (capped at 50 errors with overflow notification) on incomplete observations, preventing silent acceptance of clean workspace claims.
+     - Preserved deterministic SHA-256 snapshot IDs over observed files, and verified non-Git directories remain clean observations.
+  2. **Workstream B: Missing Baselines & MCP Invariant Consistency (`proofmesh.adapters.mcp_server`)**:
+     - Eliminated all silent baseline reconstruction: `inspect_changes` and `get_handoff` return explicit error responses when baseline snapshots are missing.
+     - Enforced snapshot completeness (`baseline.complete == True` and `current.complete == True`) across `inspect_changes`, `get_status`, and `claim_completion`.
+     - Removed fuzzy snapshot ID matching candidates; required exact `evidence.snapshot_after == current.snapshot_id` equality.
+     - Guaranteed that on any invariant failure, `claim_completion` fails closed without setting `SessionState.ACCEPTED` or creating an approval verdict.
+  3. **Workstream C: Truthful Integration Status & Strict Policy Pinning (`proofmesh.cli`, `antigravity.py`)**:
+     - Defaulted all CLI-created sessions and seeded demo sessions to `IntegrationStatus.UNGUARDED`.
+     - Removed adapter logic that inferred live hook/MCP capabilities from stored `session.integration_status`.
+     - Defined explicit capability states: `UNGUARDED` (neither active), `PARTIAL` (hooks or MCP active), `ENFORCED` (both verified active).
+     - Verified that active sessions with policy digests differing from current trusted policy fail closed with explicit policy mismatch errors.
+  4. **Workstream D: Demo Fixture & Database Project Collision Safety (`proofmesh.demo`)**:
+     - Enforced strict fixture safety: demo inspects all colliding files (`src/math_service.py`, `tests/test_math.py`, `pytest.ini`, `config/security.toml`) and refuses to run if any file contains foreign, non-demo content.
+     - Safeguarded database operations: verifies database belongs exclusively to `seeded-demo-project` and contains only known demo tasks (`task-calc-extension`); refuses foreign projects or non-demo tasks without touching caller data.
+     - Protected cleanup operations: verifies temporary violation file content matches expected config before deletion; refuses to delete altered files.
+     - Maintained full 10-phase repeatable recovery loop (`BLOCK → correction → fresh verification → ALLOW`) and preserved blocked reports.
+  5. **Workstream E: UI Workspace Scoping, Sanitization & Receipt Determinism (`proofmesh.ui`)**:
+     - Scoped dashboard queries strictly to the configured workspace (`repo_root`); unscoped queries select the latest session for the configured workspace rather than globally newest session across other projects.
+     - Foreign sessions requested via `session_id` are strictly rejected with 404 / `None`.
+     - Computed deterministic `receipt_digest` for unevaluated sessions based on canonical state, distinguishing export UUIDs/timestamps from tamper-evident state integrity.
+  6. **Main Integrator: Canonical SHA-256 Digest Validation (`proofmesh.core.evaluator`, `mcp_server.py`)**:
+     - Eliminated legacy mock placeholder bypasses (`is_mock_placeholder`, `is_legacy`, `SAMPLE_SNAP_1_ID`).
+     - Enforced strict canonical SHA-256 equality across all acceptance paths. Updated test fixtures to use real, properly constructed models and policy digests.
+- **Why:** Delivers Checkpoint 10 per PRD and TRD §0/§20, closing all remaining correctness and security gaps and establishing an uncompromising, demonstrable quality bar.
+- **Validation:** Executed full test suite of 253 automated tests under target CPython 3.14.9 (`.venv314`, 253/253 passed in 18.12s) and 205 tests under host Python 3.12.3 (`.venv`, 205/205 passed in 16.70s). Verified `.venv/bin/uv build --wheel`, CLI demo executed twice cleanly, MCP stdio subprocess communication, and UI workspace isolation.
+- **Test result:** 253 passed in 18.12s on CPython 3.14.9; 205 passed in 16.70s on Python 3.12.3.
+- **Limitations:** Trusted verification gates execute target-repository code with the invoking user's permissions (by design; not a sandbox). Live agent enforcement is reported only when both host hooks and MCP connection are actively verified.
+
 ## 2026-10-25T03:15:00+05:30 — Stabilization, Security Repair, and PRD Conformance Milestone
 
 - **Changed:** Performed comprehensive security remediation, data safety enforcement, and end-to-end PRD conformance hardening across the shared core, adapters, and demo:
