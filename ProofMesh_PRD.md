@@ -220,6 +220,7 @@ Priority definitions: **P0** = necessary for the hackathon end-to-end demo; **P1
 | FR-28 | P0 | CI verdict on the PR | `proofmesh verify --ci` re-runs trusted gates on the PR head and posts status + receipt; works for agents without hooks (e.g. cloud Devin). |
 | FR-29 | P1 (first cut if time is short) | Stepwise refactor + change budget | Ordered refactor steps; only the current step is writable; next step unlocks after verification; over-budget changes ask the developer. |
 | FR-30 | P0 | Context re-anchoring | Compact state card injected at session start, after compaction and on handoff between agents. |
+| FR-31 | P1 | Optional advisor | Off by default; one config line points at a `systemone` endpoint (self-hosted Laya or hosted Jev); answers can only escalate (warn/ask), never accept; failures change nothing; answers labelled advisory. |
 | FR-19 | P0 | Review-ready submission | One-command offline demo produces Markdown + JSON reports; README claims map to code and tests; CI is green. |
 
 ## 10. Quality gates
@@ -343,6 +344,9 @@ Because a live agent may not misbehave on cue, keep a recorded run and its expor
 - User approval can be represented by an explicit local CLI/UI action plus a contract digest; cryptographic identity is future work.
 - A completion hook may request continuation but cannot guarantee that the agent will obey forever or prevent a separate chat message claiming completion.
 - ProofMesh targets any MCP + hooks tool; Codex, Claude Code, Google Antigravity and OpenCode are the initial hook targets. Google Antigravity (VS Code extension) is the demo host; VS Code hook/plugin support must be verified first.
+
+- **Constraints:** zero budget; developer hardware is 8 GB RAM, i3 11th gen, no GPU. The MVP needs no paid service, GPU or bundled model. ProofMesh runs only when the host starts it (hook processes, stdio MCP server, CI job).
+- **Advisor models** (Laya/Jev) are optional and advisory; measured Laya on CPU at ~0.7–0.8 s per call and ~2.8 GB RAM, so they are used only at completion, in CI or on demand (TRD §13.8).
 
 ## 18. Reference links
 

@@ -103,6 +103,18 @@ proofmesh hook stop < payload.json # lifecycle hook entry point
 
 **Revisit Docker later** only as an *optional sandbox for check execution* (running gates for untrusted repositories in a throwaway container), not as the way ProofMesh itself runs.
 
+### 3.2 How ProofMesh runs (no daemon, no model)
+
+ProofMesh has no server, background process or model of its own. The host starts it:
+
+- **Hooks:** at each hook event the host runs `uvx proofmesh==<pinned> hook <event> --host <name>`: a short-lived Python process that reads JSON from stdin, answers on stdout and exits.
+- **MCP:** the host starts `proofmesh mcp` (stdio) when an agent session opens and stops it when the session ends.
+- **State:** the SQLite file in the per-user data directory (§14) carries state between these processes.
+- **PR gate:** `proofmesh verify --ci` runs in the repository's CI (GitHub Actions is free for public repositories).
+- **Intelligence:** all reasoning about code comes from the host agent's own model. ProofMesh is deterministic code: contracts, snapshots, trusted checks, evaluator.
+
+Target footprint: tens of MB of RAM per process (to be measured), so it fits the developer's 8 GB RAM / i3 laptop with no GPU and a zero budget. Running the project's own tests is the heavy part, not ProofMesh.
+
 ## 4. Proposed repository layout
 
 ```text
@@ -135,6 +147,8 @@ proofmesh/
       project_init.py         # `proofmesh init`: stack detection -> proposed policy
       arch_rules.py           # built-in Python import rules (stdlib ast)
       test_obligations.py
+    advisors/
+      systemone.py                 # optional advisor client (§13.8); stdlib HTTP only
     adapters/
       mcp_server.py
       hook_protocol.py        # host-neutral hook event/response models
@@ -771,6 +785,51 @@ Hooks are not a guarantee everywhere: Devin documents hooks as best effort and f
 
 The enforcement report lists which layers are active per host. The gate re-runs trusted gates itself; it does not trust evidence uploaded by the agent.
 
+### 13.8 Optional advisor: lightweight decision models (P1, off by default)
+
+Some useful questions are fuzzy and can't be answered by rules alone: "is this agent message a completion claim?", "does this new test assert behaviour?". An **advisor** is an optional external decision model that answers such typed questions. ProofMesh only calls it; it never installs, hosts or trains a model.
+
+**Protocol:** the `POST /v1/systemone` decision protocol used by TypeSafe's hosted Jev API and served by the open-source Laya (`laya-serve`). Questions are typed: `noul` (yes/no probability), `score`, `choice`. One client covers both self-hosted Laya and the hosted API.
+
+```toml
+# policy.toml (trusted; developer-owned)
+[advisor]
+enabled = false
+protocol = "systemone"
+url = "http://127.0.0.1:8000/v1/systemone"   # laya-serve, or a hosted endpoint
+api_key_env = "PROOFMESH_ADVISOR_KEY"        # optional; name of an env var, never the key itself
+timeout_ms = 2000
+```
+
+**Rules that keep ProofMesh a tool, not a harness:**
+
+1. **Escalate only.** An advisor answer can add `WARN` or `REQUIRE_APPROVAL` (ask the developer). It can never produce `ALLOW`, clear a blocker or mark a task `ACCEPTED`. The deterministic evaluator (§11) stays the only judge.
+2. **Fail-safe.** Unreachable, slow, malformed or invalid responses (validated with Pydantic like every other input, §5.6) are ignored, recorded, and change nothing.
+3. **Recorded as advisory evidence.** Each answer is stored with the question, the advisor URL/model, the probability and the threshold used, labelled `ADVISORY` in reports.
+4. **Thresholds are trusted policy.** The developer sets the threshold per question; ProofMesh compares the probability deterministically.
+5. **Off the hot path.** Never called from `PreToolUse`/`PostToolUse`. Only at Stop, in `proofmesh verify --ci`, or on demand (`proofmesh review`).
+6. **No code or task text leaves the machine** unless the developer points `url` at a remote endpoint; `proofmesh doctor` shows where advisor calls go.
+
+**First questions (all advisory):**
+
+| ID | Type | Question | Effect if above threshold |
+|---|---|---|---|
+| ADV-1 | `noul` | Does the agent's final message claim the task is done or tests pass? | trigger the claim check (§6.6 #1) in hosts without `claim_complete` |
+| ADV-2 | `noul` | Does this new/changed test assert the behaviour named in the criterion? | `WARN`; Strict profile → `REQUIRE_APPROVAL` |
+| ADV-3 | `choice` | Does this amendment narrow, keep or widen scope? | widen → always ask the developer |
+| ADV-4 | `noul` | Does this rejected change suggest a reusable architecture rule? | propose a rule draft for the developer |
+
+**Measured (2026-10-24, Devin VM, Intel Xeon, CPU only, English checkpoint, laya 0.4.14):**
+
+| Threads | p50 per call (2 `noul` questions) | Peak RSS | Download | Install size |
+|---|---|---|---|---|
+| 2 | ~832 ms | ~2.8 GB | 808 MB | ~1.1 GB (PyTorch CPU + transformers) |
+| 4 | ~673 ms | ~2.8 GB | | |
+
+Sample: "I refactored the feed service … All tests pass and the task is complete." → claims done 0.822, claims tests pass 0.858. Not measured on the developer's i3 laptop. Laya's own docs report GPU latency ~33 ms, base checkpoints below the majority-class baseline on its typed-decision benchmark (fine-tuning provides the capability), and over-confident probabilities until recalibrated. Third-party figures quoted in Laya's repo put hosted Jev at ~236–276 ms p50. Conclusion: workable on 8 GB but heavy next to an IDE; suitable for Stop/CI/on-demand use only, and the advisor's accuracy must be checked on ProofMesh's own labelled examples before any threshold is trusted.
+
+**Zero-budget options, in order:** (1) no advisor (MVP default; the demo needs none); (2) the host agent's own model via MCP sampling or Devin CLI prompt hooks, which is free but host support is unverified; (3) self-hosted Laya on the developer's machine; (4) a hosted decision or LLM API with a free tier, subject to its limits.
+
 ## 14. Storage (SQLite only)
 
 **Decision (D-4, revised): SQLite only**, standard-library `sqlite3`, hand-written parameterized SQL. No Postgres/Neon, no ORM, no migration framework.
@@ -830,6 +889,7 @@ proofmesh task render <task-id> --revision <n>
 proofmesh task show <task-id>
 proofmesh approvals list | approve <id> | reject <id> --reason <text> | waive <gate-id> --reason <text>
 proofmesh install <host> [--project] | uninstall <host>
+proofmesh review [--advisor]           # on-demand advisory questions (§13.8)
 proofmesh verify --ci [--base <ref>]   # re-run trusted gates on HEAD, write receipt, set exit code
 proofmesh init [--dry-run]
 proofmesh rules add | list | propose
@@ -967,6 +1027,9 @@ The MVP is done when, in the prepared sample repository:
 - import-linter: https://import-linter.readthedocs.io/
 - dependency-cruiser: https://github.com/sverweij/dependency-cruiser
 
+- Laya (open-source decision engine, `systemone` protocol): https://github.com/NandhaKishorM/laya
+- Devin CLI hooks / plugins: https://docs.devin.ai/cli/extensibility/hooks/overview.md, https://docs.devin.ai/cli/extensibility/plugins/overview.md
+
 ## 22. Review readiness (jury + AI code reviewer)
 
 The submission will be evaluated by human judges and an AI agent that reviews the code. Both reward the same things: a clear story, code that matches its claims, and evidence that it works.
@@ -1010,6 +1073,9 @@ Decisions taken during ideation (branch `devin/ideation`):
 - **D-24** Three layers (guide, steer, gate); the CI verdict is the one guarantee that doesn't depend on host hooks (§13.7).
 - **D-25** Differentiators approved by the developer: evidence-cited completion, stepwise refactors with change budget, context re-anchoring, focused failure feedback, a verdict + receipt on the PR (§6.6). If time is short, stepwise refactors are cut first.
 - **D-26** Build has not started; it begins only after the developer approves it, following further discussion.
+- **D-27** ProofMesh has no daemon and no model: hosts spawn short-lived hook processes and the stdio MCP server; SQLite holds state; reasoning comes from the host agent (§3.2).
+- **D-28** Optional advisor (P1, off by default) using the `systemone` decision protocol (Laya self-hosted or hosted Jev); escalate-only, fail-safe, recorded as advisory evidence, never on the hot path (§13.8).
+- **D-29** Constraints: zero budget; developer hardware 8 GB RAM, i3 11th gen, no GPU. No required paid service or GPU anywhere in the MVP.
 - **D-16** ProofMesh enforces test obligations: tests with every change, new tests must run and fail on baseline, no test weakening (§6.3).
 
 Open questions:
@@ -1021,3 +1087,5 @@ Open questions:
 4. **Digest normalization:** which Markdown changes count as "cosmetic" vs. intent changes.
 5. **Checks that write files:** redirect caches per tool vs. run checks on a temporary worktree.
 6. **Check cost:** baseline gates at session start plus fail-on-baseline runs add time; allow reusing results for an unchanged snapshot?
+8. **Advisor accuracy:** build a small labelled set (agent messages, tests) and measure Laya on it before trusting any ADV threshold; measure latency on the developer's i3.
+9. **MCP sampling:** which hosts (Antigravity, Devin, Claude Code) let an MCP server ask the host model for a completion.
