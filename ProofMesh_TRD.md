@@ -25,10 +25,10 @@ The core must not implement its own model loop, choose which agent writes code, 
 
 Guiding rule: **minimal dependencies**. Every third-party package must earn its place; prefer the standard library.
 
-- **Language:** Python 3.14 (pinned via `requires-python = ">=3.14,<3.15"`). Planned third-party dependencies (Pydantic, MCP SDK, PyYAML) publish Python 3.14 classifiers on PyPI.
-- **Runtime dependencies (target):** `pydantic` (v2), `mcp` (official SDK), `pyyaml` (TaskFile front matter — or zero if TOML front matter is chosen, §23). Everything else from the standard library.
+- **Language:** Python 3.14 (pinned via `requires-python = ">=3.14,<3.15"`). Planned third-party dependencies (Pydantic, MCP SDK) publish Python 3.14 classifiers on PyPI.
+- **Runtime dependencies (target):** `pydantic` (v2) and `mcp` (official SDK). Everything else from the standard library.
 - **Models/validation:** Pydantic v2 in strict mode for all domain models and every trust boundary (see §5.6). Configuration is a strict Pydantic model loaded from a user-level TOML file (`tomllib`) and environment variables — no `pydantic-settings` dependency needed.
-- **TaskFile format:** structured Markdown with a small front-matter block (see §6). Front matter parsed with `yaml.safe_load` only; Markdown body parsed by a strict, line-based section parser (no Markdown library).
+- **TaskFile format:** structured Markdown with a small front-matter block (see §6). Front matter is **TOML** parsed with stdlib `tomllib`; trusted policy and user config are TOML too. Markdown body parsed by a strict, line-based section parser (no Markdown library).
 - **Persistence:** SQLite only, via the standard-library `sqlite3` module with hand-written, parameterized SQL. No ORM, no query builder, no migration framework. Database file lives in a protected per-user data directory outside the workspace (see §14).
 - **MCP:** official MCP Python SDK; pin the SDK version in the lock file and use stable, commonly supported tool primitives.
 - **CLI:** `argparse` (standard library).
@@ -87,7 +87,7 @@ Rationale:
 1. **Checks need the project's own toolchain.** ProofMesh's job is to run the target repo's tests/linters. Natively, it uses the toolchain already on the developer's machine. In a container, every project would need a derived image with its toolchain installed — the largest source of complexity in the container design.
 2. **Hook/MCP latency and moving parts.** Measured on the Linux dev VM (warm cache, `python:3.14-slim` = 180 MB uncompressed): bare Python start ≈ 0.01 s, `docker exec` into a running container ≈ 0.05 s, `docker run --rm` ≈ 0.27 s per call. Linux overhead is tolerable, but it adds a daemon dependency, and Docker Desktop on macOS/Windows (not measured) adds a VM layer, file-sharing quirks and SQLite-WAL-over-file-sharing risk.
 3. **Friction for users and reviewers.** Containers add path mapping (host paths in hook payloads → `/workspace`), UID/ownership problems (`git` "dubious ownership"), and require Docker to be installed and running.
-4. **Dependencies are now tiny.** With stdlib `sqlite3` and `argparse`, a native install is three direct dependencies (the MCP SDK brings its own transitive ones); a container no longer buys much portability.
+4. **Dependencies are now tiny.** With stdlib `sqlite3` and `argparse`, a native install is two direct dependencies (the MCP SDK brings its own transitive ones); a container no longer buys much portability.
 5. **The real container benefit — sandboxing untrusted test code — is out of MVP scope** (the demo runs only a prepared, trusted repository).
 
 What is kept from the container design: state stored outside the repo, ProofMesh never writes to the workspace, least-privilege subprocess execution (§8.1).
@@ -111,7 +111,7 @@ proofmesh/
   uv.lock
   README.md
   config/
-    default-policy.yaml
+    default-policy.toml
   src/proofmesh/
     __init__.py
     cli.py
@@ -134,7 +134,14 @@ proofmesh/
       handoff.py
     adapters/
       mcp_server.py
-      codex_hooks.py
+      hook_protocol.py        # host-neutral hook event/response models
+      hosts/                  # thin per-host JSON mappings
+        codex.py
+        claude_code.py
+        antigravity.py
+        opencode.py
+  integrations/
+    opencode-plugin/proofmesh.ts   # tiny TS plugin that shells out to `proofmesh hook`
     providers/
       command_check.py
       pytest_check.py
@@ -156,7 +163,7 @@ proofmesh/
   demo/
     sample-app/
     TASK.md                   # Markdown TaskFile
-    policy.yaml
+    policy.toml
     run_demo.py               # one-command, offline, seeded demo
 ```
 
@@ -280,7 +287,7 @@ Mutable aggregates (e.g. `Session`) use `validate_assignment=True`; state change
 
 ## 6. TaskFile format and lifecycle
 
-The TaskFile is a **structured Markdown document**. Markdown keeps it readable for humans and natural for LLMs to read and draft; a small YAML front-matter block plus a fixed set of headings keeps it deterministic to parse.
+The TaskFile is a **structured Markdown document**. Markdown keeps it readable for humans and natural for LLMs to read and draft; a small TOML front-matter block (`+++` delimiters) plus a fixed set of headings keeps it deterministic to parse.
 
 **Ownership: ProofMesh owns TaskFiles.** ProofMesh acts as the project manager for task intent. Agents can read the active TaskFile and *propose* a new task or an amendment, but no TaskFile is created, changed or superseded without a ProofMesh decision:
 
@@ -302,17 +309,18 @@ Design rules:
 Illustrative format (exact grammar to be finalized, semantics stable):
 
 ````markdown
----
-proofmesh_taskfile: 1
-task_id: task-1042
-parent_revision: null
-risk_level: medium
-scope:
-  allowed_paths: ["app/auth/reset/**", "tests/auth/**"]
-  restricted_paths: ["database/migrations/**"]
-  unexpected_change_policy: require_justification
-required_gates: [regression-tests, auth-tests]
----
++++
+proofmesh_taskfile = 1
+task_id = "task-1042"
+kind = "feature"                 # feature | bugfix | refactor (§6.2)
+risk_level = "medium"
+required_gates = ["regression-tests", "auth-tests"]
+
+[scope]
+allowed_paths = ["app/auth/reset/**", "tests/auth/**"]
+restricted_paths = ["database/migrations/**"]
+unexpected_change_policy = "require_justification"
++++
 
 # Add password reset without changing login behavior
 
@@ -343,8 +351,8 @@ Free-form context for the agent. Included in the digest.
 **Parser contract**
 
 - Size cap (64 KiB) before parsing; UTF-8 only; normalize line endings to LF and strings to NFC.
-- Front matter: `yaml.safe_load`, reject YAML anchors/aliases and custom tags, then validate with the strict `TaskContract` model.
-- Body: line-based parser that splits on `#`/`##` headings outside fenced code blocks. Allowed `##` headings: `Objective` (required), `Non-goals`, `Acceptance Criteria` (required, ≥1 item), `Constraints`, `Assumptions`, `Notes`. Unknown or duplicate headings are errors (prevents hidden instructions outside the digested structure).
+- Front matter: text between the opening and closing `+++` lines, parsed with `tomllib.loads` (TOML forbids duplicate keys and has explicit types — no YAML aliases or implicit `yes`/`no` booleans), then validated with the strict `TaskContract` model. The canonical renderer emits TOML with a small hand-written writer covering only the types the schema uses (strings, integers, string arrays, one level of tables).
+- Body: line-based parser that splits on `#`/`##` headings outside fenced code blocks. Allowed `##` headings: `Objective` (required), `Non-goals`, `Acceptance Criteria` (required, ≥1 item), `Constraints`, `Assumptions`, `Notes`; refactor tasks add `Invariants` (required for `kind = "refactor"`) and `Target Structure` (§6.2). Unknown or duplicate headings are errors (prevents hidden instructions outside the digested structure).
 - Acceptance-criterion grammar: `- [AC-<n>] <description>` followed by optional indented `- gates: <gate-id>[, <gate-id>...]`. Duplicate IDs, unknown gate IDs (not in trusted policy), or gates not listed in `required_gates`/policy are errors.
 - `proofmesh task lint <file>` reports all errors with line numbers; `proofmesh task render` produces canonical Markdown from the model. Property test: `parse(render(m)) == m`.
 - Digest = SHA-256 over canonical JSON of the validated model (§5.6), so cosmetic whitespace changes do not alter intent identity; the raw-file SHA-256 is stored alongside for audit.
@@ -358,6 +366,61 @@ Lifecycle:
 5. `amend` / `supersede` — a new proposal goes through the same decision; the approved revision is never overwritten and older revisions remain auditable.
 
 For vague tasks, read-only investigation may happen before approval. The implementation plan and write scope should be approved before implementation begins, except for explicitly authorized low-risk auto-approval policy. Keep user interviews and automatic clarification to consequential ambiguity; do not ask the user about every trivial implementation detail.
+
+### 6.1 Decision authority: human in the loop, by profile
+
+ProofMesh decides routine matters itself and asks the developer for critical ones. The operating profile (PRD §8) sets the line. Profiles change *who decides*, never the truth of evidence.
+
+| Decision | Guided | Flow | Strict |
+|---|---|---|---|
+| Initial task contract | ask | ask | ask |
+| Amendment that strengthens (adds AC/gate, narrows scope) | ask (with explanation) | auto-accept, notify | ask |
+| Amendment that weakens (removes AC/gate, widens scope, lowers risk) | ask | ask | ask |
+| Risk level increase | ask | ask | ask |
+| Change to a restricted path | ask | ask | block, then ask |
+| Unexpected (non-restricted) path with agent justification | ask | accept with `WARN`, justification recorded | ask |
+| Retry budget exhausted | stop, handoff, ask to continue | stop, handoff, notify | stop, handoff, ask to continue |
+| All mandatory gates pass, no blockers | ask to confirm `ACCEPTED` | auto-`ACCEPTED`, notify | ask to confirm `ACCEPTED` |
+| Mandatory gate failed | `BLOCKED` | `BLOCKED` | `BLOCKED` |
+| Trusted policy changed mid-session | block, then ask | block, then ask | block, then ask |
+
+A failed mandatory gate can never be turned into acceptance by a profile. The only way past it is an explicit user **waiver** with a reason, recorded as an approval event and shown in every report as `ACCEPTED_WITH_WAIVER`.
+
+**How ProofMesh asks.** Pending decisions go into an approvals queue in the database. The developer answers through:
+
+1. `proofmesh approvals list | approve <id> | reject <id> --reason ...` (CLI, always available, source of truth);
+2. the host's native prompt where a hook supports it (e.g. Antigravity `PreToolUse` can return `ask`/`force_ask`; Codex and Claude Code have permission-related hook events), used for tool-level decisions;
+3. MCP elicitation, if the connected client supports it (verify per client; optional).
+
+Agents never get an approve tool. While a decision is pending, the agent receives `PENDING_APPROVAL` with a one-line summary to relay to the developer, and the `Stop` hook keeps the task non-accepted.
+
+### 6.2 Task kinds: feature, bugfix, refactor
+
+ProofMesh must work beyond "add a feature". The first real user is a social media app that is being **refactored and simplified**: a vibe-coded, over-engineered codebase reduced to something simple and boring, with clear architectural separation. The front-matter field `kind` selects kind-specific rules; the core stays the same.
+
+**Baseline-relative evidence (all kinds).** At session start ProofMesh runs the required gates once against the baseline snapshot and stores the results as baseline evidence. Gate outcomes are then compared baseline → current:
+
+| Baseline | Current | Meaning |
+|---|---|---|
+| pass | pass | unchanged |
+| pass | fail | **regression** → `BLOCK` |
+| fail | pass | fixed / improved |
+| fail | fail | pre-existing failure — reported, not blamed on the agent; policy decides whether it blocks acceptance |
+
+**`feature`:** current rules (scope, gates, freshness).
+
+**`bugfix`:** at least one acceptance criterion must map to a **fail-to-pass** gate: it fails on the baseline and passes after the change. This shows the test actually exercises the bug, which addresses the "tests that pass without testing anything" problem.
+
+**`refactor`:**
+
+- `## Invariants` (required) lists behaviour that must not change. Each invariant maps to gates; any pass → fail on those gates is a regression.
+- `## Target Structure` describes the intended architecture (layers, module boundaries) in prose for the agent and the reviewer.
+- **Architecture boundary gate** (`architecture-boundaries` type): a configured command that checks import rules, using existing tools such as `import-linter` (Python) or `dependency-cruiser` / `eslint-plugin-boundaries` (JS/TS). ProofMesh runs it and records the result; it does not implement its own import analysis.
+- **Public API gate** (optional): a configured snapshot/diff of the public surface (e.g. OpenAPI document, exported symbols).
+- **Simplification metrics** (evidence, not pass/fail unless thresholds are configured): lines added/removed and files added/removed from `git diff --numstat`, plus dependency count delta from the project manifest. Shown in the report as "simpler or not".
+- Refactors legitimately touch many files, so `allowed_paths` is usually broad; `restricted_paths` (migrations, config, public contracts) carries most of the scope protection.
+
+Long refactors are a series of small TaskFiles, each with its own invariants and acceptance; the handoff packet carries context from one to the next.
 
 ## 7. Repository snapshot and scope analysis
 
@@ -490,6 +553,8 @@ Keep tool descriptions narrow and input schemas validated. Proposed tools:
 - `generate_handoff(session_id)` — produce the compact, schema-versioned context packet.
 - `record_agent_event(session_id, event)` — only if an adapter needs a controlled event-ingestion tool; validate payload and size.
 
+There is deliberately no approve/waive tool: approvals come only from the developer (§6.1).
+
 Do not expose `run_shell(command)`, arbitrary filesystem write, unrestricted browser execution, or a tool that lets the model edit approved policy. The MCP server should call the same Python core as the CLI and hooks.
 
 The MCP server should use local stdio transport for the first demo. If remote HTTP transport is introduced later, add authentication, authorization, origin validation, request limits and explicit network exposure controls.
@@ -511,15 +576,35 @@ Capabilities are reported as facts, not inferred from MCP availability.
 
 ### 13.2 First adapter
 
-Choose one harness that is available and testable at the event. Codex is a practical candidate because its current official documentation includes `Stop` and `SubagentStop` lifecycle hooks. A minimal adapter can:
+### 13.2 Host adapters (agent-neutral)
 
-- call `proofmesh hook <event>` with hook JSON on stdin;
-- record an event and compute completion status;
-- return the host-specific continuation response when mandatory evidence is missing and retry budget remains;
-- prevent repeated hook continuation using host-provided loop flags plus ProofMesh's own attempt budget;
-- keep the task non-accepted after the budget is exhausted.
+ProofMesh must work with any tool that supports MCP and/or lifecycle hooks. Integration has two layers:
 
-Validate the exact event names, input/output schema and continuation semantics against the installed host version. Hook contracts are host-specific and may evolve. Don't assume all agent harnesses behave like Codex.
+1. **MCP (all hosts):** the same stdio server everywhere. Gives read/propose/verify/status/handoff tools. Advisory on its own → enforcement level `PARTIAL` at best.
+2. **Hooks (per host):** every host calls one entry point, `proofmesh hook <event> --host <name>`, with the host's JSON on stdin. A thin host module maps that JSON to ProofMesh's host-neutral `HookEvent` model and maps the `HookDecision` back to the host's output format. No policy logic lives in host modules.
+
+Initial targets (from current official docs; validate exact schemas against the installed version before implementing):
+
+| Host | MCP | Hook events relevant to ProofMesh | Can block a tool call | Can continue a finished turn | Adapter form |
+|---|---|---|---|---|---|
+| Codex | yes | `SessionStart`, `PreToolUse`, `PostToolUse`, `Stop`, `SubagentStop`, `UserPromptSubmit` | yes (`permissionDecision: deny`) | yes (`Stop` → `{"decision":"block","reason":…}`; `stop_hook_active` flag) | command hook |
+| Claude Code | yes | `SessionStart`, `PreToolUse`, `PostToolUse`, `Stop`, `SubagentStop`, `TaskCompleted`, … | yes | yes (`Stop` decision control) | command hook |
+| Google Antigravity (App / CLI / IDE) | yes | `SessionStart`, `PreToolUse`, `PostToolUse`, `PreInvocation`, `PostInvocation`, `Stop` | yes (`deny`; also `ask`/`force_ask` for human approval) | via `PostInvocation` `terminationBehavior: "force_continue"`; `Stop` continuation semantics to verify | command hook |
+| OpenCode | yes | plugin events: `tool.execute.before`, `tool.execute.after`, `session.idle`, `session.diff`, … | yes (from `tool.execute.before`) | to verify (`session.idle` looks notification-only) | tiny TS plugin that shells out to `proofmesh hook` |
+| Any other MCP-capable tool | yes | none | no | no | MCP only → `PARTIAL`/`UNGUARDED` |
+
+What each adapter does on the key events:
+
+- **Session start:** register session, capture baseline snapshot, run baseline gates (§6.2).
+- **Before tool use:** for file-writing tools, check the target path against scope; restricted path → `deny` or host-native `ask` per profile (§6.1). Never rewrite tool arguments.
+- **After tool use:** record the event and changed paths; mark evidence stale if relevant files changed.
+- **Stop / end of turn:** evaluate completion. If mandatory evidence is missing/failed and retry budget remains, return the host's continuation response with a short, focused reason; otherwise let the turn end and keep the task non-accepted.
+
+Loop safety for every host: honour host loop flags (e.g. Codex `stop_hook_active`), apply ProofMesh's own continuation budget, and make evaluation idempotent per (event, snapshot).
+
+`proofmesh integrate <host>` prints the exact config snippet (MCP server entry + hook entries) for that host; `--write` applies it only after showing a diff. The enforcement report shows, per host, which capabilities are active.
+
+**Demo host:** one host is shown end-to-end with hooks (choose the one most reliable to record; CLI-based Codex or Claude Code are the simplest to script). A second host can be shown in MCP + hooks mode to prove neutrality if time allows.
 
 ### 13.3 Enforcement caveat
 
@@ -571,7 +656,7 @@ Minimum useful commands:
 
 ```text
 proofmesh init
-proofmesh task propose --file task.yaml
+proofmesh task propose --file TASK.md
 proofmesh task approve <task-id> --revision <n>
 proofmesh session start <task-id>
 proofmesh inspect <session-id>
@@ -582,6 +667,8 @@ proofmesh hook <event-name>
 proofmesh task lint <file>
 proofmesh task render <task-id> --revision <n>
 proofmesh task show <task-id>
+proofmesh approvals list | approve <id> | reject <id> --reason <text> | waive <gate-id> --reason <text>
+proofmesh integrate <host> [--write]
 proofmesh mcp
 proofmesh report <session-id> --format md|json
 proofmesh demo
@@ -603,7 +690,7 @@ Exact syntax is implementation-flexible. Return meaningful exit codes: `0` accep
 - ProofMesh never writes to the workspace; check subprocesses get a minimal environment, a controlled working directory and `/tmp`-redirected caches where the tool supports it.
 - Database and artifacts live in the per-user data directory (`0700`/`0600`), outside the agent-writable workspace; all SQL is parameterized.
 - Agents cannot create or change TaskFiles directly; only ProofMesh decisions (policy rule or user approval) produce revisions (§6).
-- All external input is validated by strict Pydantic models with size caps before use (§5.6); the TaskFile parser rejects unknown sections, YAML aliases and custom tags.
+- All external input is validated by strict Pydantic models with size caps before use (§5.6); the TaskFile parser rejects unknown sections, invalid TOML and duplicate keys.
 - Test scripts remain potentially arbitrary code. Only run the prepared demo app for the event; future untrusted-repository support requires a sandbox or a clear opt-in security boundary.
 
 ## 17. Observability and performance
@@ -628,9 +715,12 @@ Exact syntax is implementation-flexible. Return meaningful exit codes: `0` accep
 - Retry budget is respected; no infinite continuation.
 - MCP schemas reject unknown gate IDs and oversized payloads.
 - Runner times out and captures bounded output.
-- Markdown TaskFile: valid file parses; unknown/duplicate headings, malformed AC lines, duplicate AC IDs, unknown gate IDs, YAML aliases and oversized files are rejected with line numbers; `parse(render(m)) == m`; cosmetic whitespace edits keep the canonical digest stable.
+- Markdown TaskFile: valid file parses; unknown/duplicate headings, malformed AC lines, duplicate AC IDs, unknown gate IDs, invalid TOML / duplicate keys and oversized files are rejected with line numbers; `parse(render(m)) == m`; cosmetic whitespace edits keep the canonical digest stable.
 - Strict models reject coercible-but-wrong types, extra fields, naive datetimes, path traversal (`../`, absolute, symlink escape) and oversized collections; secrets never appear in `repr`/errors.
 - Storage: migrations apply in order and are idempotent; concurrent writers (two processes) do not lose writes; hash-chain verification detects a modified row; `quick_check` failure blocks start-up; backup/restore round-trips; no query uses string-formatted SQL (lint rule/grep test).
+- Decision matrix: each (decision, profile) cell in §6.1 behaves as specified; no profile turns a failed mandatory gate into `ACCEPTED`; waivers are labelled.
+- Baseline-relative evidence: pass→fail is a regression; fail→fail is reported as pre-existing; `bugfix` tasks without a fail-to-pass gate cannot be accepted; `refactor` tasks require `## Invariants`.
+- Host adapters: recorded sample payloads for each supported host map to the same `HookEvent`; `HookDecision` maps back to valid host output (golden-file tests).
 - TaskFile ownership: agent `propose_task`/`propose_contract_amendment` never produces an approved revision without a policy rule or user approval; scope expansion is escalated; rejected proposals return reasons.
 
 ### Integration tests (must-have)
@@ -657,7 +747,7 @@ Use a prepared repository and a known task. The test must not require an LLM to 
 5. Loop/retry detector and handoff packet.
 6. CLI end-to-end flow.
 7. MCP tools backed by the same core.
-8. One lifecycle hook adapter and enforcement-health report.
+8. Host-neutral hook protocol + one demo host end-to-end, enforcement-health report; then other host mappings (golden-file tested) as time allows.
 9. Optional small UI and Playwright smoke check only if the end-to-end path is already reliable.
 
 If time slips, cut dashboard breadth and optional browser automation before cutting contract integrity, evidence freshness, runtime validation, or the working hook.
@@ -696,6 +786,13 @@ The MVP is done when, in the prepared sample repository:
 - Python `sqlite3` module: https://docs.python.org/3.14/library/sqlite3.html
 - Python `tomllib`: https://docs.python.org/3.14/library/tomllib.html
 - uv tools (`uv tool install`, `uvx`): https://docs.astral.sh/uv/guides/tools/
+- Claude Code hooks: https://docs.claude.com/en/docs/claude-code/hooks
+- Google Antigravity hooks: https://antigravity.google/docs/hooks
+- Google Antigravity MCP: https://antigravity.google/docs/mcp
+- OpenCode plugins: https://opencode.ai/docs/plugins/
+- OpenCode MCP servers: https://opencode.ai/docs/mcp-servers/
+- import-linter: https://import-linter.readthedocs.io/
+- dependency-cruiser: https://github.com/sverweij/dependency-cruiser
 
 ## 22. Review readiness (jury + AI code reviewer)
 
@@ -708,6 +805,7 @@ The submission will be evaluated by human judges and an AI agent that reviews th
 - **Green CI:** ruff, pyright (strict) and pytest run on every push; badge in README.
 - **Tests as documentation:** test names read as requirements (`test_failed_mandatory_gate_blocks_acceptance`, `test_agent_cannot_approve_own_amendment`).
 - **Traceability:** README links PRD requirement IDs (FR-xx) to tests; the decision log (§23) shows reasoning for reviewers.
+- **Real-world use:** if possible, show ProofMesh governing a real refactor step on the social media app (a short recording or report), next to the seeded demo.
 - **Security hygiene visible in code:** parameterized SQL, no `shell=True`, allowlisted gates, strict Pydantic models at boundaries.
 
 ## 23. Ideation log and open questions
@@ -722,14 +820,18 @@ Decisions taken during ideation (branch `devin/ideation`):
 - **D-6** Scope is the hackathon demo; no team/cloud/multi-machine features.
 - **D-7** ProofMesh owns the TaskFile lifecycle and acts as project manager for task intent: agents only propose; ProofMesh rejects, auto-accepts under trusted policy, or escalates to the user (§6). It still does not write code, plan implementations or schedule agents.
 - **D-8** The deliverable is judged by a jury *and* an AI code reviewer; review readiness is a P0 requirement (§22).
+- **D-9** TaskFile front matter, trusted policy and user config are TOML (stdlib `tomllib`); PyYAML dropped. Runtime deps: `pydantic`, `mcp`.
+- **D-10** Human in the loop: ProofMesh decides routine matters and asks the developer for critical ones; the operating profile sets the line (§6.1).
+- **D-11** Agent-neutral integration: MCP everywhere + thin hook mappings for Codex, Claude Code, Google Antigravity and OpenCode (§13.2).
+- **D-12** Refactors and bugfixes are first-class task kinds with baseline-relative evidence; first real user is a social media app refactor (§6.2).
+- **D-13** Keep it simple but high-impact for the demo.
 
 Open questions:
 
-1. **How autonomous is the "project manager"?** Which amendment types may ProofMesh auto-accept without the user (e.g. narrowing scope, adding ACs)? Should the initial contract ever be auto-approved?
-2. **Front matter: YAML vs TOML.** TOML front matter (`+++`) parses with stdlib `tomllib` (drops PyYAML, avoids YAML aliases/implicit typing pitfalls) but needs a small hand-written renderer; YAML is more familiar to LLMs.
-3. **TaskFile grammar details:** exact AC/assumption line syntax; whether scope/gates stay in front matter or move into body sections.
-4. **Digest normalization:** which Markdown changes count as "cosmetic" (whitespace only?) vs. intent changes.
-5. **Checks that write files:** redirect caches to `/tmp` per tool vs. run checks on a temporary copy/worktree of the repo.
-6. **Which agent harness for the demo** (Codex hooks or another available harness) and its hook latency budget.
-7. **Dogfooding:** should ProofMesh's own development be governed by ProofMesh TaskFiles, and shown to the jury as evidence?
-
+1. **Demo host:** which host to record end-to-end (Codex, Claude Code, Antigravity, OpenCode)?
+2. **Demo scenario:** the PRD §15 refactor scenario (messy mini social-feed app → layered) — confirm, or use a slice of the real social media app?
+3. **Social media app stack:** languages/frameworks determine which boundary tool (`import-linter`, `dependency-cruiser`, …) and test commands the gates use.
+4. **TaskFile grammar details:** exact AC/invariant/assumption line syntax.
+5. **Digest normalization:** which Markdown changes count as "cosmetic" vs. intent changes.
+6. **Checks that write files:** redirect caches to `/tmp` per tool vs. run checks on a temporary worktree.
+7. **Baseline gate cost:** running all required gates at session start doubles check time; allow reusing a recent baseline result for the same snapshot?

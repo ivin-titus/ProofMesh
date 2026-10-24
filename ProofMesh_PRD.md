@@ -76,7 +76,13 @@ This is a product hypothesis, not a claim that the overall category or any indiv
 
 **ProofMesh value:** structured handoff containing contract revision, code-state identifier, changed paths, checks, previous failed attempts, unresolved assumptions, and required next actions.
 
-### 5.4 Team / repository maintainer (future)
+### 5.4 Developer simplifying an AI-generated codebase (first real user)
+
+**Needs:** refactor a vibe-coded, over-engineered app (the first case is a social media app) into something simple and boring with clear architectural separation, using coding agents, without silently breaking behaviour.
+
+**ProofMesh value:** refactor TaskFiles with explicit invariants, baseline-relative evidence (any pass → fail is a regression), architecture-boundary gates, and simplification metrics in the report.
+
+### 5.5 Team / repository maintainer (future)
 
 **Needs:** apply consistent project-specific acceptance policies across developers, agents, and CI.
 
@@ -111,7 +117,7 @@ This is a product hypothesis, not a claim that the overall category or any indiv
 
 ### 7.1 Intent
 
-A TaskFile is the approved task contract, written as a **structured Markdown file** (small YAML front matter plus fixed sections) so it is easy for both people and LLMs to read and draft, while staying strictly machine-parseable. It captures:
+A TaskFile is the approved task contract, written as a **structured Markdown file** (small TOML front matter plus fixed sections) so it is easy for both people and LLMs to read and draft, while staying strictly machine-parseable. It captures:
 
 - Task ID and revision.
 - User objective and explicit non-goals.
@@ -171,6 +177,8 @@ Profiles configure the same core; they must not be separate logic implementation
 
 Mandatory gate failures cannot be converted into success merely by changing profiles. A profile can change notification, escalation, and autonomy policy, not the truth of evidence.
 
+Profiles also set the **human-in-the-loop line**: ProofMesh decides routine matters itself and asks the developer for critical ones (initial contract, weakening amendments, restricted paths, policy changes, waivers). Guided and Strict ask more often; Flow auto-accepts strengthening amendments and final acceptance when all gates pass. The full matrix is in TRD §6.1.
+
 ## 9. Functional requirements
 
 Priority definitions: **P0** = necessary for the hackathon end-to-end demo; **P1** = only after the P0 flow is stable; **Future** = architecture should not prevent it, but it is not promised in the demo.
@@ -185,7 +193,7 @@ Priority definitions: **P0** = necessary for the hackathon end-to-end demo; **P1
 | FR-06 | P0 | Evaluate completion | Return a deterministic verdict from contract, evidence, policy, and integration health. |
 | FR-07 | P0 | Detect repeated failure | Detect repeated normalized failures or no progress; stop automatic retries after a configurable budget. |
 | FR-08 | P0 | Expose core through MCP | A compatible agent can read the contract, inspect changes, run configured verification, retrieve status and request a handoff. |
-| FR-09 | P0 | Integrate one lifecycle hook | A supported hook records an event and checks completion status; continuation is bounded and documented. |
+| FR-09 | P0 | Integrate one lifecycle hook (demo host) | A supported hook records an event and checks completion status; continuation is bounded and documented. |
 | FR-10 | P0 | Show enforcement coverage | Report `ENFORCED`, `PARTIAL`, or `UNGUARDED` based on adapter capabilities and health. |
 | FR-11 | P0 | Generate a compact handoff | Include objective, contract revision, changed paths, current code state, failed checks, prior attempts, unresolved assumptions and required next action. |
 | FR-12 | P1 | Trigger browser verification on UI changes | If a configured UI path changes, run a configured Playwright smoke test or explicitly report UI verification unavailable. |
@@ -195,6 +203,9 @@ Priority definitions: **P0** = necessary for the hackathon end-to-end demo; **P1
 | FR-16 | P0 | Lightweight native install | Installs with `uv tool install`/`uvx` on Python 3.14 with no external services; ProofMesh never writes to the repo working tree. |
 | FR-17 | P0 | Safe local storage | The SQLite database (stdlib driver, hand-written parameterized SQL) lives in a protected per-user data directory outside the workspace, survives restarts, supports consistent backups and detects tampering of append-only records. |
 | FR-18 | P0 | ProofMesh-owned TaskFiles | Agents can only propose tasks/amendments; every revision results from a recorded ProofMesh decision (policy rule or user approval). |
+| FR-20 | P0 | Mode-based human approvals | Critical decisions are queued for the developer per the profile matrix; agents cannot approve; waivers are explicit and labelled in reports. |
+| FR-21 | P0 | Task kinds with baseline-relative evidence | `feature`, `bugfix` (requires a fail-to-pass gate) and `refactor` (requires invariants; pass → fail is a regression) are supported. |
+| FR-22 | P1 | Multiple host adapters | Codex, Claude Code, Google Antigravity and OpenCode map to one hook protocol (golden-file tested); other MCP tools work in advisory mode. |
 | FR-19 | P0 | Review-ready submission | One-command offline demo produces Markdown + JSON reports; README claims map to code and tests; CI is green. |
 
 ## 10. Quality gates
@@ -282,15 +293,17 @@ Do not claim quality improvement from these metrics until they are measured agai
 
 ## 15. Demo narrative
 
-Use a prepared repository with a small FastAPI service and a minimal frontend. Create a task with clear acceptance criteria and a UI-affecting behavior. Demonstrate:
+Keep it simple, make it land. Proposed scenario (to confirm): a small, deliberately messy "vibe-coded" social-feed app (FastAPI, one tangled module mixing HTTP, business logic and SQL, plus an existing test suite). This mirrors ProofMesh's first real use: simplifying an over-engineered social media app.
 
-1. Create and approve the TaskFile.
-2. Let a real supported coding agent make changes.
-3. Detect an unrelated change or a required test regression.
-4. Show a focused intervention and bounded retry behavior.
-5. Run backend/API checks and, if configured, a Playwright smoke test.
-6. Correct the defect and re-run checks.
-7. Show fresh evidence and `ACCEPTED`; show the integration coverage report.
+1. **Refactor task:** the developer approves a `refactor` TaskFile: split into routes / services / repository layers; invariants = existing API tests; boundary rule = routes must not import the database layer; migrations are restricted.
+2. ProofMesh runs **baseline gates** at session start and records pre-existing results.
+3. A real coding agent (demo host) starts working.
+4. **Scope:** a seeded edit to a migration file is caught (`RESTRICTED`) and escalated for approval.
+5. **Architecture:** the boundary gate fails (a route still imports the DB layer) → `BLOCKED`, with a focused intervention.
+6. **Loop:** the same failure repeats → automatic retries stop at the budget; a compact handoff is produced.
+7. **Freshness:** a passing run is followed by another edit → evidence becomes `STALE`.
+8. Fix, re-run: invariants show no pass → fail; boundary gate passes; simplification metrics show the change → `ACCEPTED` (confirmed by the developer per profile). Show the enforcement coverage report.
+9. (Optional, short) **Bugfix task:** a test fails on baseline and passes after the fix, proving fail-to-pass evidence.
 
 Use deterministic seeded cases so the demonstration does not depend on an LLM making a specific mistake on demand. Label scripted or replayed multi-agent events as simulations; do not imply the system observed a real subagent if it did not.
 
@@ -313,7 +326,7 @@ Use deterministic seeded cases so the demonstration does not depend on an LLM ma
 - The MVP does not provide formal correctness proofs.
 - User approval can be represented by an explicit local CLI/UI action plus a contract digest; cryptographic identity is future work.
 - A completion hook may request continuation but cannot guarantee that the agent will obey forever or prevent a separate chat message claiming completion.
-- The exact first agent adapter should be selected based on which supported harness is available and testable at the event; Codex is a candidate because its official documentation describes `Stop` and `SubagentStop` hooks.
+- ProofMesh targets any MCP + hooks tool; Codex, Claude Code, Google Antigravity and OpenCode are the initial hook targets. One of them is shown end-to-end in the demo.
 
 ## 18. Reference links
 
