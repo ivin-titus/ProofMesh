@@ -1,8 +1,7 @@
+from importlib import resources
 from pathlib import Path
 import tomllib
 from proofmesh.models.policy import TrustedPolicy
-
-DEFAULT_POLICY_PATH = Path(__file__).parent.parent.parent / "config" / "default-policy.toml"
 
 
 def load_policy(toml_content: str) -> TrustedPolicy:
@@ -14,12 +13,24 @@ def load_policy(toml_content: str) -> TrustedPolicy:
 def load_policy_file(path: Path | str) -> TrustedPolicy:
     """Load and validate a trusted policy file from disk."""
     file_path = Path(path).resolve()
+    if not file_path.is_file():
+        raise FileNotFoundError(f"Policy file not found: {file_path}")
     content = file_path.read_text(encoding="utf-8")
     return load_policy(content)
 
 
 def get_default_policy() -> TrustedPolicy:
-    """Retrieve the default trusted policy."""
-    if DEFAULT_POLICY_PATH.exists():
-        return load_policy_file(DEFAULT_POLICY_PATH)
-    return TrustedPolicy()
+    """Retrieve the canonical packaged default trusted policy.
+    
+    Loads 'default-policy.toml' from 'proofmesh.resources'.
+    Raises FileNotFoundError if the packaged resource cannot be located.
+    """
+    try:
+        resource_ref = resources.files("proofmesh.resources").joinpath("default-policy.toml")
+        content = resource_ref.read_text(encoding="utf-8")
+    except Exception as e:
+        raise FileNotFoundError(
+            f"Canonical default policy 'default-policy.toml' is missing from proofmesh.resources: {e}"
+        ) from e
+
+    return load_policy(content)

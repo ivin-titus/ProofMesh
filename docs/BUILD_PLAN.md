@@ -2,7 +2,7 @@
 
 **Status:** Active build checklist  
 **Working branch:** main  
-**Updated at:** 2026-10-25T00:17:59+05:30  
+**Updated at:** 2026-10-25T00:35:00+05:30  
 **Deadline noted for planning:** October 25, 2026, 11:00 IST; confirm against current organizer communications. A live remaining-time countdown is intentionally omitted because it quickly becomes stale.  
 **Authority:** [PRD](PRD.md) defines product behavior and priorities; [TRD](TRD.md) §0 and §20 define the technical MVP boundary; this plan defines implementation order and cut lines. Follow [AGENTS.md](../AGENTS.md) for workflow and safety practices. Roadmap and historical ideation notes must not expand the MVP beyond the explicit scope lock.
 
@@ -44,17 +44,15 @@ A judge should be able to see the approved contract, what changed, why the task 
 
 **Exit condition:** One task/event/evidence round-trip works. Do not build hash-chain audit, a daemon, ORM, remote database, or backup UX tonight.
 
-### Pre-Checkpoint 2 gate — package policy and foundation regressions (pending)
+### Checkpoint 1.2 — Policy packaging and foundation hardening (completed)
 
-A source review of `d5778c5` identified a likely installed-wheel default-policy gap. Resolve and test these items before beginning Checkpoint 2; this is a review finding, not a claim that a runtime test has reproduced each problem.
+- [x] Package the default trusted policy as a reliable package resource (`proofmesh.resources/default-policy.toml`). Resolved via `importlib.resources`; raises actionable `FileNotFoundError` if missing, verified via installed wheel test.
+- [x] Test recursive immutability of nested `EventRecord.payload` data via recursive freeze (`MappingProxyType` + `tuple`), preserving JSON serialization.
+- [x] Review storage-path permission handling: accurately distinguish unsupported-filesystem errnos (`ENOSYS`, `EOPNOTSUPP`, `ENOTSUP`) from unexpected I/O and permission errors. Enforce `0700` hierarchy across data dir, intermediate `projects` dir, per-project dir, and `0600` on database file.
+- [x] Make packaging tests reproducible from a clean checkout without depending on a stale prebuilt `dist/` artifact (`get_or_build_wheel` helper).
+- [x] Reconcile Python-version documentation with `requires-python = ">=3.14,<3.15"`; distinguish the supported package range from source tests run under Python 3.12.
 
-- [ ] Package the default trusted policy as a reliable package resource. `src/proofmesh/config.py` currently resolves `config/default-policy.toml` relative to the source checkout and falls back to an empty `TrustedPolicy()` if the file is missing. An installed wheel may therefore lose its mandatory test gate. Fail clearly if the policy resource is unavailable, and test the installed wheel.
-- [ ] Test recursive immutability of nested `EventRecord.payload` data; a top-level `MappingProxyType` alone does not freeze nested lists/dictionaries.
-- [ ] Review storage-path permission handling so unsupported-filesystem cases are distinguished from real permission/I/O failures.
-- [ ] Make packaging tests reproducible from a clean checkout without depending on a stale prebuilt `dist/` artifact.
-- [ ] Reconcile Python-version documentation with `requires-python = ">=3.14,<3.15"`; distinguish the supported package range from any source tests run under Python 3.12.
-
-**Go/no-go:** Do not begin Checkpoint 2 until these repairs are committed with focused tests and the full suite is green on the target Python runtime.
+**Go/no-go:** Foundation hardening complete, tested, and green on both CPython 3.14.9 (31/31 passed) and Python 3.12.3 (31/31 passed). Ready for Checkpoint 2.
 
 ### Checkpoint 2 — Intent / TaskFile
 

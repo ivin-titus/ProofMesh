@@ -26,6 +26,13 @@ def validate_project_id(project_id: str, base_dir: Path | None = None) -> str:
     return project_id
 
 
+UNSUPPORTED_CHMOD_ERRNOS = {
+    errno.ENOSYS,
+    getattr(errno, "EOPNOTSUPP", 95),
+    getattr(errno, "ENOTSUP", 95),
+}
+
+
 def _secure_directory(dir_path: Path) -> None:
     """Create directory with 0700 permissions; fail if permission is denied."""
     dir_path.mkdir(parents=True, exist_ok=True)
@@ -34,9 +41,11 @@ def _secure_directory(dir_path: Path) -> None:
     except PermissionError as e:
         raise PermissionError(f"Cannot set secure permissions (0700) on {dir_path}: {e}") from e
     except OSError as e:
-        if e.errno not in (errno.ENOSYS, getattr(errno, "EOPNOTSUPP", 95)):
-            # Ignore only if filesystem doesn't support chmod (e.g. FAT/exFAT)
+        # Ignore only if filesystem genuinely doesn't support chmod (e.g. FAT/exFAT)
+        if e.errno in UNSUPPORTED_CHMOD_ERRNOS:
             pass
+        else:
+            raise
 
 
 def get_proofmesh_data_dir(create: bool = False) -> Path:
@@ -69,23 +78,35 @@ def get_project_db_path(project_id: str, base_dir: Path | None = None) -> Path:
         base_dir = get_proofmesh_data_dir(create=True)
     else:
         base_dir = Path(base_dir).resolve()
+        _secure_directory(base_dir)
 
     # Validate against traversal
     validate_project_id(project_id, base_dir=base_dir)
 
-    project_dir = base_dir / "projects" / project_id
+    # Explicitly secure intermediate projects directory and per-project directory
+    projects_dir = base_dir / "projects"
+    _secure_directory(projects_dir)
+
+    project_dir = projects_dir / project_id
     _secure_directory(project_dir)
 
     return project_dir / "proofmesh.db"
 
 
 def secure_db_file(db_path: Path) -> None:
-    """Ensure database file has restrictive permissions (0600)."""
-    if db_path.exists():
-        try:
-            os.chmod(db_path, 0o600)
-        except PermissionError as e:
-            raise PermissionError(f"Cannot set secure permissions (0600) on {db_path}: {e}") from e
-        except OSError as e:
-            if e.errno not in (errno.ENOSYS, getattr(errno, "EOPNOTSUPP", 95)):
-                pass
+    """Ensure database file and companion WAL/SHM files have restrictive permissions (0600)."""
+    for candidate in [
+        db_path,
+        db_path.with_name(db_path.name + "-wal"),
+        db_path.with_name(db_path.name + "-shm"),
+    ]:
+        if candidate.exists():
+            try:
+                os.chmod(candidate, 0o600)
+            except PermissionError as e:
+                raise PermissionError(f"Cannot set secure permissions (0600) on {candidate}: {e}") from e
+            except OSError as e:
+                if e.errno in UNSUPPORTED_CHMOD_ERRNOS:
+                    pass
+                else:
+                    raise

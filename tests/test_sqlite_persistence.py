@@ -30,7 +30,7 @@ from proofmesh.storage import (
     get_proofmesh_data_dir,
     get_project_db_path,
 )
-from proofmesh.storage.paths import validate_project_id
+from proofmesh.storage.paths import _secure_directory, secure_db_file, validate_project_id
 
 SAMPLE_DIGEST = "sha256:" + "b" * 64
 
@@ -316,4 +316,111 @@ def test_transaction_connection_closed_on_error(temp_store: ProofMeshStore):
         assert conn2.execute("PRAGMA schema_version;").fetchone() is not None
     finally:
         conn2.close()
+
+
+def test_nested_event_payload_roundtrip(temp_store: ProofMeshStore):
+    """Verify that deeply nested event payloads round-trip through SQLite and remain immutable."""
+    now = datetime.now(timezone.utc)
+    temp_store.create_project("proj-nest", "/repo")
+    rev = TaskRevision(
+        task_id="task-nested",
+        revision=1,
+        summary="Nested payload test",
+        contract_digest=SAMPLE_DIGEST,
+    )
+    temp_store.save_task_revision(rev, project_id="proj-nest")
+
+    sess = Session(
+        session_id="sess-nest",
+        task_id="task-nested",
+        contract_revision=1,
+        repo_root="/repo",
+        baseline_snapshot_id="snap-0",
+        policy_digest=SAMPLE_DIGEST,
+        started_at=now,
+    )
+    temp_store.save_session(sess)
+
+    event = EventRecord(
+        event_id="evt-nest-1",
+        session_id="sess-nest",
+        source_adapter="antigravity",
+        event_type="PreToolUse",
+        occurred_at=now,
+        summary="Nested payload test",
+        payload={
+            "tool_call": {
+                "tool": "edit_file",
+                "params": {"file": "src/app.py", "lines": [10, 20]},
+            },
+            "execution_history": [{"attempt": 1, "status": "ok"}],
+        },
+    )
+    temp_store.save_event(event)
+
+    loaded = temp_store.get_event("evt-nest-1")
+    assert loaded is not None
+    assert loaded.payload["tool_call"]["tool"] == "edit_file"
+    assert loaded.payload["tool_call"]["params"]["lines"] == (10, 20)
+    assert loaded.payload["execution_history"][0]["status"] == "ok"
+
+    # Verify deep immutability on loaded event
+    with pytest.raises(TypeError):
+        loaded.payload["tool_call"]["params"]["file"] = "tampered.py"  # type: ignore[index]
+
+    with pytest.raises(AttributeError):
+        loaded.payload["tool_call"]["params"]["lines"].append(30)  # type: ignore[attr-defined]
+
+    with pytest.raises(TypeError):
+        loaded.payload["execution_history"][0]["attempt"] = 99  # type: ignore[index]
+
+
+def test_filesystem_permissions_hierarchy(tmp_path: Path):
+    """Verify permissions: data dir 0700, projects dir 0700, per-project dir 0700, db file 0600."""
+    db_path = get_project_db_path("secure-proj", base_dir=tmp_path)
+    assert db_path.name == "proofmesh.db"
+
+    # Base dir
+    assert (tmp_path.stat().st_mode & 0o777) == 0o700
+    # Intermediate projects dir
+    assert ((tmp_path / "projects").stat().st_mode & 0o777) == 0o700
+    # Per-project dir
+    assert ((tmp_path / "projects" / "secure-proj").stat().st_mode & 0o777) == 0o700
+
+    # DB file permissions after store creation
+    store = ProofMeshStore(db_path)
+    assert db_path.exists()
+    assert (db_path.stat().st_mode & 0o777) == 0o600
+
+
+def test_secure_directory_error_handling(tmp_path: Path, monkeypatch):
+    """Verify that unsupported chmod errors are ignored, but unexpected errors and PermissionError raise."""
+    import errno
+
+    test_dir = tmp_path / "perm_test"
+
+    # 1. Unsupported chmod errnos (ENOSYS, EOPNOTSUPP, ENOTSUP) must be ignored
+    def mock_chmod_unsupported(path, mode):
+        raise OSError(errno.ENOSYS, "Function not implemented")
+
+    monkeypatch.setattr(os, "chmod", mock_chmod_unsupported)
+    _secure_directory(test_dir)  # Should not raise
+
+    # 2. Unexpected OSError (e.g. EIO, EROFS) must be re-raised
+    def mock_chmod_io_error(path, mode):
+        raise OSError(errno.EIO, "I/O error")
+
+    monkeypatch.setattr(os, "chmod", mock_chmod_io_error)
+    with pytest.raises(OSError) as exc:
+        _secure_directory(test_dir)
+    assert exc.value.errno == errno.EIO
+
+    # 3. PermissionError must be re-raised with actionable message
+    def mock_chmod_perm_error(path, mode):
+        raise PermissionError("Permission denied")
+
+    monkeypatch.setattr(os, "chmod", mock_chmod_perm_error)
+    with pytest.raises(PermissionError) as p_exc:
+        _secure_directory(test_dir)
+    assert "Cannot set secure permissions" in str(p_exc.value)
 

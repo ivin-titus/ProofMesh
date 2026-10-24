@@ -32,28 +32,51 @@ def validate_utc_datetime(v: datetime) -> datetime:
     return v.astimezone(timezone.utc)
 
 
-def to_immutable_tuple(v: Any) -> tuple:
-    """Coerce sequences into immutable tuples."""
-    if isinstance(v, tuple):
+def freeze_value(v: Any) -> Any:
+    """Recursively freeze mappings into MappingProxyType and sequences into tuples.
+    
+    Leaves strings, bytes, numbers, booleans, and None unchanged.
+    """
+    if isinstance(v, (str, bytes, int, float, bool, type(None))):
         return v
-    if isinstance(v, (list, Sequence)) and not isinstance(v, (str, bytes)):
-        return tuple(v)
+    if isinstance(v, Mapping):
+        return MappingProxyType({k: freeze_value(val) for k, val in v.items()})
+    if isinstance(v, (list, tuple, Sequence)):
+        return tuple(freeze_value(item) for item in v)
+    return v
+
+
+def unfreeze_value(v: Any) -> Any:
+    """Recursively convert MappingProxyType to dict and tuples to list for JSON serialization."""
+    if isinstance(v, (MappingProxyType, Mapping)):
+        return {k: unfreeze_value(val) for k, val in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [unfreeze_value(item) for item in v]
+    return v
+
+
+def to_immutable_tuple(v: Any) -> tuple:
+    """Coerce sequences and nested collections into deeply immutable tuples."""
+    if isinstance(v, (str, bytes)):
+        return v
+    if isinstance(v, (list, tuple, Sequence)):
+        return tuple(freeze_value(item) for item in v)
     return v
 
 
 def to_immutable_dict(v: Any) -> MappingProxyType:
-    """Coerce dicts into read-only MappingProxyType."""
-    if isinstance(v, MappingProxyType):
-        return v
+    """Coerce mappings and nested collections into deeply immutable MappingProxyType."""
+    if v is None:
+        return MappingProxyType({})
     if isinstance(v, Mapping):
-        return MappingProxyType(dict(v))
+        return freeze_value(v)
     raise ValueError("Must be a mapping/dictionary")
 
 
 # Immutable dictionary type that serializes cleanly to JSON/dict
 ImmutableDict = Annotated[
     MappingProxyType[str, Any],
-    PlainSerializer(lambda v: dict(v), return_type=dict),
+    PlainSerializer(lambda v: unfreeze_value(v), return_type=dict),
 ]
 
 # Common constrained types matching TRD §5.6

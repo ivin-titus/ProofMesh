@@ -5,8 +5,10 @@ from proofmesh.models.base import (
     ImmutableDict,
     Sha256Digest,
     StrictModel,
+    freeze_value,
     to_immutable_dict,
     to_immutable_tuple,
+    unfreeze_value,
     validate_utc_datetime,
 )
 from proofmesh.models.event import EventRecord

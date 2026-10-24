@@ -169,6 +169,34 @@ def test_nested_container_immutability():
     with pytest.raises(AttributeError):
         event.payload.update({"new_key": "val"})  # type: ignore[attr-defined]
 
+    # 5. Deeply nested dictionaries and lists in event.payload must also be immutable
+    nested_event = EventRecord(
+        event_id="evt-2",
+        session_id="sess-1",
+        source_adapter="test",
+        event_type="test",
+        occurred_at=datetime.now(timezone.utc),
+        summary="nested event",
+        payload={
+            "metadata": {"author": "dev", "tags": ["prod", "auth"]},
+            "history": [{"step": 1, "status": "ok"}],
+        },
+    )
+    # Cannot modify nested dict
+    with pytest.raises(TypeError):
+        nested_event.payload["metadata"]["author"] = "tampered"  # type: ignore[index]
+
+    # Cannot modify nested list
+    with pytest.raises(AttributeError):
+        nested_event.payload["metadata"]["tags"].append("evil")  # type: ignore[attr-defined]
+
+    with pytest.raises(TypeError):
+        nested_event.payload["metadata"]["tags"][0] = "tampered"  # type: ignore[index]
+
+    # Cannot modify nested dict inside list
+    with pytest.raises(TypeError):
+        nested_event.payload["history"][0]["status"] = "failed"  # type: ignore[index]
+
 
 def test_default_policy_validation():
     """Verify that default trusted policy loads and validates correctly."""

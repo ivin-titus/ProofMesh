@@ -21,9 +21,10 @@ from proofmesh.models import (
     TaskRevision,
     VerdictOutcome,
     VerdictRecord,
+    unfreeze_value,
 )
 from proofmesh.storage.migrations import apply_migrations
-from proofmesh.storage.paths import secure_db_file, validate_project_id
+from proofmesh.storage.paths import _secure_directory, secure_db_file, validate_project_id
 
 
 class ProofMeshStore:
@@ -32,7 +33,7 @@ class ProofMeshStore:
     def __init__(self, db_path: Path | str) -> None:
         self.db_path = Path(db_path).resolve()
         # Ensure parent directory exists and file permissions are secured
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        _secure_directory(self.db_path.parent)
         self._ensure_pragmas_and_schema()
 
     def get_connection(self) -> sqlite3.Connection:
@@ -311,7 +312,7 @@ class ProofMeshStore:
 
     def save_event(self, event: EventRecord) -> None:
         """Persist an event record."""
-        payload_json = json.dumps(dict(event.payload))
+        payload_json = json.dumps(unfreeze_value(event.payload))
         with self.transaction() as conn:
             conn.execute(
                 """

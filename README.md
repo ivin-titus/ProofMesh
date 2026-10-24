@@ -8,12 +8,12 @@ ProofMesh is designed to keep coding agents aligned with an approved task, detec
 
 **Core package, strict models, and persistent storage implemented.**
 - **Checkpoint 0 (Integration spike):** Verified Google Antigravity CLI (`agy` 1.4.7) lifecycle hooks (`PreInvocation`, `PreToolUse`, `Stop`) with denial and continuation semantics, plus live stdio MCP client/server round-trip.
-- **Checkpoint 1 & 1.1 (Package, migrations, and persistent state):**
-  - Package configured via `pyproject.toml` and pinned via `uv.lock` for CPython 3.14 (also validated on Python 3.12).
-  - Strict Pydantic v2 models with UTC-normalized timestamps, bounded fields, and immutable nested containers (`tuple`, `MappingProxyType`) preventing in-place mutations.
-  - Minimal trusted policy configuration in `config/default-policy.toml` and loader in `proofmesh.config`.
-  - Transactional SQLite migrations with atomic schema upgrades, rollback on failure, and rejection of future schema versions. Built wheel package verified to package and execute migrations.
-  - Parameterized SQLite store with secure directory permissions (`0700`), file permissions (`0600`), and path-traversal prevention.
+- **Checkpoint 1, 1.1 & 1.2 (Package, policy packaging, migrations, and persistent state):**
+  - Package configured via `pyproject.toml` (`requires-python = ">=3.14,<3.15"`, locked via `uv.lock` for CPython 3.14, and source-level test suite verified on host Python 3.12).
+  - Canonical default trusted policy packaged in `proofmesh.resources` (`src/proofmesh/resources/default-policy.toml`), guaranteed to survive wheel installation and verified against repository sample.
+  - Strict Pydantic v2 models with UTC-normalized timestamps, bounded fields, and deeply immutable nested containers (`tuple`, `MappingProxyType`) preventing in-place mutations.
+  - Transactional SQLite migrations with atomic schema upgrades, rollback on failure, and rejection of future schema versions. Built wheel package verified to package and execute migrations in isolated environments.
+  - Parameterized SQLite store with secure directory permissions (`0700` across data, intermediate projects, and per-project directories), file permissions (`0600`), and path-traversal prevention with accurate OS error handling.
 - **Remaining checkpoints (Checkpoints 2–8):** TaskFile parsing/approval, repository snapshots/scope, verification providers, evaluator/verdicts, and CLI/demo orchestration are active/upcoming milestones.
 
 ## Documentation
@@ -29,7 +29,17 @@ ProofMesh is designed to keep coding agents aligned with an approved task, detec
 
 ## Implementation and runtime
 
-The runtime is implemented with Python 3.14 (`requires-python = "==3.14.*"` in `pyproject.toml` and `uv.lock`, validated on both CPython 3.14.9 and host Python 3.12.3), Pydantic v2, standard library SQLite, the official MCP Python SDK, and `uv`. The implementation is strictly local-first with zero external hosted model, paid service, Docker, or network dependencies for the core demo and testing.
+The runtime targets Python 3.14 (`requires-python = ">=3.14,<3.15"` in `pyproject.toml`, pinned via `uv.lock` for CPython 3.14). The full test suite and source implementation are verified under both target CPython 3.14.9 and host Python 3.12.3. The stack uses Pydantic v2, standard library SQLite, the official MCP Python SDK, and `uv`. The implementation is strictly local-first with zero external hosted model, paid service, Docker, or network dependencies for the core demo and testing.
+
+### Canonical build and test
+
+```bash
+# Build wheel
+uv build --wheel
+
+# Run test suite under Python 3.14 or Python 3.12
+pytest tests/
+```
 
 ## Intended demo
 

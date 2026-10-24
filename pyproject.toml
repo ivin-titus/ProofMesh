@@ -27,6 +27,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "proofmesh.storage.migrations" = ["*.sql"]
+"proofmesh.resources" = ["*.toml"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

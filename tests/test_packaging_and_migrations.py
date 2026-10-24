@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import sqlite3
 import subprocess
@@ -15,24 +16,72 @@ from proofmesh.storage.migrations import (
 from proofmesh.storage.store import ProofMeshStore
 
 
-def test_wheel_contains_migration_sql():
-    """Verify built wheel package explicitly includes migrations/001_init.sql."""
-    dist_dir = Path(__file__).parent.parent / "dist"
-    wheels = list(dist_dir.glob("proofmesh-*.whl"))
-    assert len(wheels) >= 1, "No wheel found in dist/"
+def get_or_build_wheel() -> Path:
+    """Retrieve the built wheel or build one dynamically if absent or stale.
+    
+    This ensures packaging tests are fully reproducible on a clean clone without
+    requiring a manual pre-build step.
+    """
+    repo_root = Path(__file__).parent.parent
+    dist_dir = repo_root / "dist"
+    wheels = list(dist_dir.glob("proofmesh-*.whl")) if dist_dir.exists() else []
 
-    latest_wheel = sorted(wheels)[-1]
+    if wheels:
+        return sorted(wheels)[-1]
+
+    # In a clean checkout without dist/, build a wheel
+    dist_dir.mkdir(parents=True, exist_ok=True)
+    uv_bin = repo_root / ".venv" / "bin" / "uv"
+    if not uv_bin.exists():
+        uv_bin = repo_root / ".venv314" / "bin" / "uv"
+
+    env = os.environ.copy()
+    env["UV_CACHE_DIR"] = "/tmp/uv_cache"
+    env["UV_PYTHON_INSTALL_DIR"] = "/tmp/uv_python"
+
+    if uv_bin.exists():
+        cmd = [
+            str(uv_bin),
+            "build",
+            "--wheel",
+            "--out-dir",
+            str(dist_dir),
+            str(repo_root),
+        ]
+    else:
+        cmd = [
+            sys.executable,
+            "-m",
+            "pip",
+            "wheel",
+            "--no-deps",
+            "-w",
+            str(dist_dir),
+            str(repo_root),
+        ]
+
+    subprocess.run(cmd, env=env, check=True, capture_output=True)
+    built_wheels = sorted(dist_dir.glob("proofmesh-*.whl"))
+    assert built_wheels, f"Failed to build wheel into {dist_dir}"
+    return built_wheels[-1]
+
+
+def test_wheel_contains_migration_sql_and_default_policy():
+    """Verify built wheel package explicitly includes migrations/001_init.sql and resources/default-policy.toml."""
+    latest_wheel = get_or_build_wheel()
     with zipfile.ZipFile(latest_wheel, "r") as zf:
         namelist = zf.namelist()
         assert "proofmesh/storage/migrations/001_init.sql" in namelist, (
             f"001_init.sql missing from wheel: {namelist}"
         )
+        assert "proofmesh/resources/default-policy.toml" in namelist, (
+            f"default-policy.toml missing from wheel: {namelist}"
+        )
 
 
 def test_installed_wheel_migration_execution(tmp_path: Path):
     """Verify that an installed wheel outside the repo checkout can locate and run migrations."""
-    dist_dir = Path(__file__).parent.parent / "dist"
-    latest_wheel = sorted(dist_dir.glob("proofmesh-*.whl"))[-1]
+    latest_wheel = get_or_build_wheel()
 
     # Target directory for isolated installation
     target_install = tmp_path / "site_packages"
@@ -72,6 +121,61 @@ print("INSTALLED_WHEEL_MIGRATION_SUCCESS")
         check=True,
     )
     assert "INSTALLED_WHEEL_MIGRATION_SUCCESS" in result.stdout
+
+
+def test_installed_wheel_default_policy_execution(tmp_path: Path):
+    """Verify that an installed wheel outside the repo checkout loads the packaged default policy with gates."""
+    latest_wheel = get_or_build_wheel()
+
+    target_install = tmp_path / "site_packages_policy"
+    target_install.mkdir()
+
+    with zipfile.ZipFile(latest_wheel, "r") as zf:
+        zf.extractall(target_install)
+
+    script = """
+import sys
+from proofmesh.config import get_default_policy
+
+policy = get_default_policy()
+assert policy is not None
+assert policy.schema_version == 1
+assert policy.budget.max_retries == 3
+assert policy.budget.max_continuation_steps == 10
+assert policy.scope.default_allow_paths == ("src/**", "tests/**")
+assert "test" in policy.gates, f"test gate missing from packaged policy: {list(policy.gates.keys())}"
+test_gate = policy.gates["test"]
+assert test_gate.provider == "pytest"
+assert test_gate.mandatory is True
+assert "lint" in policy.gates
+assert policy.gates["lint"].provider == "ruff"
+print("INSTALLED_WHEEL_POLICY_SUCCESS")
+"""
+    python_bin = sys.executable
+    env = {
+        "PYTHONPATH": str(target_install),
+        "PATH": "/usr/bin:/bin",
+    }
+    result = subprocess.run(
+        [python_bin, "-c", script],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "INSTALLED_WHEEL_POLICY_SUCCESS" in result.stdout
+
+
+def test_packaged_policy_matches_repo_sample():
+    """Ensure repository sample config/default-policy.toml matches packaged resource."""
+    repo_root = Path(__file__).parent.parent
+    repo_sample = (repo_root / "config" / "default-policy.toml").read_text(encoding="utf-8")
+    packaged_resource = (
+        repo_root / "src" / "proofmesh" / "resources" / "default-policy.toml"
+    ).read_text(encoding="utf-8")
+    assert repo_sample == packaged_resource, (
+        "Sample config/default-policy.toml has drifted from src/proofmesh/resources/default-policy.toml"
+    )
 
 
 def test_rejection_of_future_schema_version():
