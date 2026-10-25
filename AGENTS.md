@@ -58,3 +58,16 @@ Use isolated subagents when they increase implementation speed and verification 
 - Report tests and validation accurately; distinguish planned, simulated, and verified behavior.
 - Never commit credentials, API keys, private participant data, or personal tokens. Use environment variables and sanitized examples. Optional advisor credentials must be read from a trusted environment-variable name and never persisted or exposed in logs, reports, or UI.
 - Keep ProofMesh's database and artifacts outside the target project's agent-writable directory. Do not store full chat transcripts or private reasoning by default.
+
+## Development and test execution
+
+- **Runtime Compatibility:** Supported runtimes are Python `>=3.12,<3.15`. Ensure changes are compatible with both host Python 3.12 and target CPython 3.14.
+- **Root Convenience Script:** Use `./proofmesh <command>` to run commands directly without manually setting `PYTHONPATH`.
+- **Test Execution:** Always verify the full test suite passes with `pytest tests/` (or `.venv/bin/pytest tests/` / `.venv314/bin/pytest tests/`) before finishing any milestone.
+- **Reference Documentation:**
+  - Architecture and sequence flows: [docs/architecture.md](docs/architecture.md)
+  - Hackathon track alignment: [docs/BUILD_TRACKS.md](docs/BUILD_TRACKS.md)
+  - Development and packaging: [docs/development.md](docs/development.md)
+  - Testing guide and test categories: [docs/testing.md](docs/testing.md)
+  - Security, threat model, and containment: [docs/security-and-privacy.md](docs/security-and-privacy.md)
+- **Licensing:** ProofMesh is licensed under the GNU Affero General Public License version 3 (`AGPL-3.0-or-later`). Maintain license compliance across all new files and packaging metadata.

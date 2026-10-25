@@ -1,5 +1,38 @@
 # Change log
 
+## 2026-10-25T06:35:00+05:30 — Establish Open-Source Documentation Baseline and Reconcile AGPL-3.0 Licensing
+
+- **Changed:** Established open-source documentation suite, reconciled license compliance, and widened runtime packaging support:
+  1. **Licensing Reconciled (`LICENSE`, `pyproject.toml`)**:
+     - Resolved licensing divergence: added official GNU Affero General Public License Version 3 (AGPL-3.0) root `LICENSE` file.
+     - Updated `pyproject.toml` to declare `license = "AGPL-3.0-or-later"` and widened Python support to `requires-python = ">=3.12,<3.15"`.
+  2. **Comprehensive Documentation Suite (`docs/`)**:
+     - Created `docs/architecture.md`: Detailed system architecture, 5-stage control loop, Mermaid component and sequence diagrams, domain model class diagram, and SQLite schema specification.
+     - Created `docs/BUILD_TRACKS.md`: Explicit mapping to Devin Hacks Kochi hackathon tracks (Track 2: "Make the Invisible Visible", Track 3: "Works Anyway", Track 1: "Kill the Busywork") with supporting technical evidence.
+     - Created `docs/development.md`: Developer guide detailing dual runtime setup (Python 3.12 host vs Python 3.14 target), root `./proofmesh` runner usage, CLI subcommands, and wheel packaging.
+     - Created `docs/testing.md`: Comprehensive QA guide documenting 265 automated test suites, testing philosophy (real DBs, real subprocesses, real stdio MCP wire frames), and test execution instructions.
+     - Created `docs/security-and-privacy.md`: Threat model, allowlisted execution security, filesystem containment (`0700`/`0600`), 64KB bounded stream drainers, canonical integrity checksums vs digital signatures, and 100% local-first privacy.
+     - Updated `docs/DOGFOODING.md`: Modernized dogfooding instructions to use `./proofmesh` and `uv pip install -e ".[dev]"`.
+  3. **Root Overhaul (`README.md`, `SUBMISSION.md`, `AGENTS.md`)**:
+     - Overhauled `README.md` with honest value proposition, clear problem definition, solution architecture, capability matrix, quick start guide, demo walkthrough, and candid limitations.
+     - Updated `SUBMISSION.md` with verified 265 test counts on both runtimes, convenience runner commands, and hackathon track mapping.
+     - Enhanced `AGENTS.md` with test execution conventions and documentation cross-referencing.
+  4. **Changelog Structural Repair (`CHANGELOG.md`)**:
+     - Restored missing milestone headings for commits `cdcfef4` and `ca35a1a`.
+     - Removed legacy template instruction text.
+- **Why:** Delivers documentation and packaging baseline required for Devin Hacks Kochi submission and establishes long-term maintainability foundations for open-source development.
+- **Validation:** Executed 265 automated tests across 24 test suites under both target CPython 3.14.9 (`.venv314`, 265/265 passed) and host Python 3.12.3 (`.venv`, 265/265 passed). Verified wheel build (`uv build --wheel`), packaging migration tests, and 10-phase seeded recovery demo (`./proofmesh demo --dir demo_target`).
+- **Test result:** 265 passed on CPython 3.14.9; 265 passed on Python 3.12.3.
+- **Limitations:** Canonical receipts use unkeyed SHA-256 digests (`receipt_digest`) providing data integrity verification rather than asymmetric cryptographic signatures; gate subprocess timeout terminates direct child process without process-group kill; host hooks invoked via `python -m proofmesh.adapters.antigravity <event>`.
+
+## 2026-10-25T05:25:37+05:30 — Add proofmesh mcp CLI Subcommand and Root Convenience Runner
+
+- **Changed:** Added `proofmesh mcp` subcommand to `src/proofmesh/cli.py` delegating to `mcp_server.main()`, added executable root `./proofmesh` convenience script auto-detecting `.venv` or `.venv314` and configuring `PYTHONPATH`, and added integration test in `tests/test_cli.py`.
+- **Why:** Simplifies operator and agent execution of ProofMesh CLI and MCP server without requiring explicit manual `PYTHONPATH` manipulation or package installation into global system Python.
+- **Validation:** Tested `./proofmesh --help`, `./proofmesh mcp`, and executed full test suite (`265 passed`).
+- **Test result:** 265 passed on CPython 3.14.9; 265 passed on Python 3.12.3.
+- **Limitations:** Root script requires bash/sh on Unix-like environments.
+
 ## 2026-10-25T04:42:00+05:30 — Pre-Rehearsal Critical Correctness and Filesystem Safety Milestone
 
 - **Changed:** Closed pre-rehearsal correctness and filesystem-safety gaps across CLI, Evaluator, Antigravity adapter, and Demo:
@@ -118,6 +151,8 @@
 - **Test result:** 145 passed in 8.44s on CPython 3.14.9; 145 passed in 8.62s on Python 3.12.3.
 - **Limitations:** None for MVP control loop. Optional stretch (local read-only status panel `proofmesh ui`) available in Checkpoint 8.
 
+## 2026-10-25T01:23:05+05:30 — Integrate Wave 1 Core Components (Checkpoints 2, 3, 4, and 5)
+
 - **Changed:** Implemented, verified, and integrated all core ProofMesh components across five parallel feature worktrees and an independent security auditor:
   1. **Intent / TaskFile (`proofmesh.core.taskfile_md`, `task_service`)**: Parses structured Markdown TaskFiles with TOML front matter, validates stable IDs and allowed gate IDs, computes deterministic canonical SHA-256 contract digests, and enforces immutable TaskRevision lifecycle (proposals, human approvals, non-mutating amendments, supersession tracking).
   2. **Repo Snapshot & Scope Control (`proofmesh.core.repo_snapshot`, `scope_analyzer`)**: Deterministic file fingerprinting, git state capture, symlink escape protection, symlink circular loop handling (supporting Python 3.12+ `RuntimeError`), fail-closed scope analysis on empty allow_paths, pattern-based restriction checks, and file limit violation detection.
@@ -129,6 +164,7 @@
 - **Test result:** 123 passed in 4.16s via pytest on Python 3.14.9.
 - **Limitations:** CLI commands and MCP host adapter are scheduled for Wave 2.
 
+## 2026-10-25T00:36:49+05:30 — Complete Checkpoint 1.2 Policy Packaging and Final Foundation Hardening
 
 - **Changed:** Packaged default trusted policy inside `proofmesh.resources` (`src/proofmesh/resources/default-policy.toml` and `__init__.py`) and added `"proofmesh.resources" = ["*.toml"]` to `pyproject.toml` package-data. Updated `src/proofmesh/config.py` to resolve default policy via `importlib.resources`, raising an actionable `FileNotFoundError` if missing rather than falling back to an empty policy. Added test verifying sample `config/default-policy.toml` matches packaged resource to prevent drift. Implemented recursive deep freezing (`freeze_value`, `unfreeze_value`) for `EventRecord.payload` and nested containers in `src/proofmesh/models/base.py`, blocking nested in-place mutation while preserving clean JSON serialization and deserialization. Corrected inverted `OSError` handling in `src/proofmesh/storage/paths.py` (`_secure_directory` and `secure_db_file`) to ignore only genuinely unsupported filesystem operations (`ENOSYS`, `EOPNOTSUPP`, `ENOTSUP`) and re-raise all unexpected I/O and permission errors. Enforced restrictive directory permissions (`0700`) hierarchically across base data dir, intermediate `projects` dir, and per-project directory, plus `0600` on database and companion WAL/SHM files. Made packaging tests fully self-contained and reproducible with `get_or_build_wheel` in `tests/test_packaging_and_migrations.py`. Reconciled Python version documentation across README, CHANGELOG, and build plan to accurately cite `requires-python = ">=3.14,<3.15"` in package metadata, locked on CPython 3.14, and tested on both Python 3.14 and 3.12.
 - **Why:** Satisfies Pre-Checkpoint 2 foundation gate: guarantees that installed wheels retain the mandatory default policy, domain event payloads cannot be modified after validation, storage permission errors are accurately reported, packaging tests run without manual prerequisites, and Python version documentation is consistent.
@@ -199,9 +235,6 @@
 - **Validation:** Compared the reference repository's `main` branch with `codex/correct-devin-hack-kochi-cainebenoy`; read the corrected RULES.md, AGENTS.md, README.md, AI_USAGE.md, CHANGELOG.md, and SUBMISSION.md; reviewed the affected ProofMesh documentation for consistency.
 - **Test result:** Documentation-only change; no runtime tests were run because the ProofMesh implementation has not started.
 - **Limitations:** No separate official organizer rules page was included in the supplied reference. Verify event-specific eligibility and submission details against current organizer communications.
-
-
-Record meaningful project changes newest first. Use the actual timestamp with timezone. Keep this file updated in the same commit as the change being recorded.
 
 ## 2026-10-24T22:09:29+05:30 — Adopt template-aligned repository workflow
 

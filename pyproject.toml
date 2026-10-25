@@ -7,9 +7,9 @@ name = "proofmesh"
 version = "0.1.0"
 description = "Intent, intervention, and evidence control layer for AI-assisted software development"
 readme = "README.md"
-# TRD §2 target runtime specification. See AI_USAGE.md / CHANGELOG.md for local environment notes.
-requires-python = ">=3.14,<3.15"
-license = "MIT"
+# TRD §2 target runtime specification. Dual-supported on Python 3.12 and 3.14.
+requires-python = ">=3.12,<3.15"
+license = "AGPL-3.0-or-later"
 authors = [{ name = "ProofMesh Contributors" }]
 dependencies = [
     "pydantic>=2.10.0,<3.0.0",

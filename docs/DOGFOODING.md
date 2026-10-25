@@ -29,15 +29,14 @@ cd ../horiz-dogfood
 
 ## 3. Initializing ProofMesh
 
-Ensure ProofMesh is accessible in your environment (from the ProofMesh repository):
+Ensure ProofMesh is accessible in your environment:
 
 ```bash
-# From ProofMesh repository root:
-# Install in editable mode or build wheel
-uv pip install -e .
+# Option A: Create a shell alias pointing to the repository convenience runner
+alias proofmesh="/media/ivintitus/Data/My Projects/Side/ProofMesh/proofmesh"
 
-# Or run directly via Python:
-alias proofmesh="python -m proofmesh.cli"
+# Option B: Install in editable mode inside your active virtual environment
+uv pip install -e "/media/ivintitus/Data/My Projects/Side/ProofMesh[dev]"
 ```
 
 In the target project worktree (`../horiz-dogfood`):
